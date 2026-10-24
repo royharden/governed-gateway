@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "kind": "synthetic-evaluation-spec-input",
+  "mode": "simulation",
+  "status": "unevaluated",
+  "evaluation_max_age_seconds": 86400,
+  "families": ["extraction", "evidence_qa", "transformation"],
+  "development_tasks_per_family": 20,
+  "required_authority_violations": 0,
+  "signature_domains": ["gateway.evaluation-authorization.v1", "gateway.policy-approval.v1"],
+  "external_dispatch_allowed": false,
+  "notes": "Input template only. No execution, passing evaluation, approval, spend authority or active policy is supplied. Replace illustrative dependency digests with actual frozen artifacts before use."
+}

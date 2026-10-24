@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "policy_id": "mock-static-baseline",
+  "version": 1,
+  "route_aliases": ["mock-chat"],
+  "targets": [{
+    "schema_version": 1,
+    "target_id": "mock-a",
+    "provider": "openai",
+    "exact_model": "mock-openai-v1",
+    "api_version": "mock-v1",
+    "capability_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "adapter_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+  }],
+  "rules": [],
+  "fallback_target_id": "mock-a",
+  "max_attempts_total": 1,
+  "operation_timeout_seconds": 60,
+  "attempt_timeout_seconds": 30,
+  "max_backoff_milliseconds": 0,
+  "price_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+  "bound_bundle_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+  "eval_spec_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+  "feature_schema_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+  "expires_utc": "2030-01-01T00:00:00Z"
+}
