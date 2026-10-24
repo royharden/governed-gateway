@@ -9,3 +9,6 @@ __pycache__/
 *.db*
 runtime/
 results/
+
+# Preserve local source-history backups without shipping them.
+*.bak-*
