@@ -19,7 +19,7 @@ import re
 from gateway.schemas.core import ErrorCode, GatewayError, canonical_bytes, digest, usd_micros
 from gateway.schemas.operator import EvaluationReport, PairedDifference
 
-from .diagnostics import FAMILIES, OUTCOMES, ROUTES
+from .diagnostics import FAMILIES, OUTCOMES, ROUTES, operation_accounting_observations
 from .observations import RECEIPT_FIELDS, amount, validate_observations
 
 
@@ -88,6 +88,9 @@ def _freeze_artifacts(report_fields: dict, diagnostics: dict, inputs: dict,
     """Scorer-private construction. Public validation happens after report creation."""
     _require("artifact_manifest_sha256" not in report_fields
              and report_fields.get("registered_evaluation") is None)
+    invariant = None if invariant_canonical is None else _decode(invariant_canonical)
+    diagnostics = {**diagnostics,
+                   "operation_accounting_observations": operation_accounting_observations(invariant)}
     diagnostic_bytes = canonical_bytes(diagnostics)
     manifest = {
         "schema_version": 1, "kind": "development_evaluation_artifact_manifest",
@@ -271,13 +274,16 @@ def _validate_inputs(inputs: dict, report: EvaluationReport) -> None:
              and inputs["reuse_source_sha256"] == sorted(sources) and set(by_source) == sources)
 
 
-def _validate_diagnostics(diagnostics: dict, report: EvaluationReport, inputs: dict) -> None:
+def _validate_diagnostics(diagnostics: dict, report: EvaluationReport, inputs: dict,
+                          *, invariant: dict | None) -> None:
     _shape(diagnostics, {"schema_version", "kind", "report_id", "evaluation_spec_sha256", "corpus_manifest_sha256",
                          "authorization_sha256", "mode", "synthetic", "interpretation", "authority_status",
                          "authority_invariant_evidence_sha256", "authority_violation_count", "promotion_status",
                          "authority_binding",
                          "call_count_semantics", "offline_semantics", "acquisition_summary", "route_summaries",
-                         "paired_statistical_differences"})
+                         "paired_statistical_differences", "operation_accounting_observations"})
+    _require(canonical_bytes(diagnostics["operation_accounting_observations"])
+             == canonical_bytes(operation_accounting_observations(invariant)))
     established = (report.authority_invariant_evidence_sha256 is not None
                    and report.authority_violation_count is not None)
     _require(diagnostics["authority_binding"] == {
@@ -366,13 +372,14 @@ def validate_artifacts(report: EvaluationReport, artifacts: EvaluationArtifacts)
         supplied = (verified.authority_invariant_evidence_sha256 is not None,
                     verified.authority_violation_count is not None, artifacts.invariant_canonical is not None)
         _require(all(supplied) or not any(supplied))
+        invariant = None
         if artifacts.invariant_canonical is not None:
             invariant = _decode(artifacts.invariant_canonical)
             _require(hashlib.sha256(artifacts.invariant_canonical).hexdigest()
                      == verified.authority_invariant_evidence_sha256)
             validate_observations(invariant, verified, manifest["inputs"], shape=_shape,
                                   hash_value=_hash, identifier=_identifier, count=_count, utc=_utc)
-        _validate_diagnostics(diagnostics, verified, manifest["inputs"])
+        _validate_diagnostics(diagnostics, verified, manifest["inputs"], invariant=invariant)
         return diagnostics
     except GatewayError:
         raise

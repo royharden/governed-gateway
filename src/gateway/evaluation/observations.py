@@ -51,7 +51,7 @@ def amount(value, *, nullable: bool = False) -> None:
 
 def validate_observations(document: dict, report, inputs: dict, *, shape, hash_value,
                           identifier, count, utc) -> None:
-    """Validate the exact journal011 schema and actual original-source coverage."""
+    """Validate journal011 plus required015 operation totals and original coverage."""
     shape(document, {"schema_version", "domain", "scope", "tuple", "candidate_sha256",
                      "evaluator_code_sha256", "authorization_sha256", "facts", "violation_count"})
     scoring_tuple = EvidenceTuple.model_validate_json(canonical_bytes(document["tuple"]))
@@ -81,7 +81,7 @@ def validate_observations(document: dict, report, inputs: dict, *, shape, hash_v
                      "request_sha256", "reply_http_status", "reply_code", "checks", "policy_snapshot_sha256",
                      "ledger_snapshot_sha256", "provider_receipt_sha256", "target_id", "outcome_status",
                      "response_text_sha256", "known_cost_usd", "attempt_count", "retained_liability_usd",
-                     "latency_ms", "accounting", "observed_utc"})
+                     "latency_ms", "accounting", "operation_accounting", "observed_utc"})
         _require(type(fact["schema_version"]) is int and fact["schema_version"] == 1
                  and fact["scope"] == "developer-observed-simulation-only"
                  and fact["authority_id"] == inputs["authority_id"]
@@ -113,6 +113,29 @@ def validate_observations(document: dict, report, inputs: dict, *, shape, hash_v
         accounting = AccountingTotals.model_validate_json(canonical_bytes(fact["accounting"]))
         _require(canonical_bytes(accounting) == canonical_bytes(fact["accounting"])
                  and accounting.authority_id == fact["authority_id"])
+        operation = None
+        ledger_present = fact["ledger_snapshot_sha256"] is not None
+        if fact["operation_accounting"] is None:
+            # Null means no verified ledger operation, never an invented healthy zero.
+            _require(not ledger_present and fact["known_cost_usd"] is None
+                     and fact["retained_liability_usd"] is None and fact["attempt_count"] is None)
+        else:
+            operation = AccountingTotals.model_validate_json(canonical_bytes(fact["operation_accounting"]))
+            _require(canonical_bytes(operation) == canonical_bytes(fact["operation_accounting"])
+                     and ledger_present and fact["operation_id"] is not None
+                     and operation.authority_id == accounting.authority_id
+                     and operation.cap_usd == accounting.cap_usd
+                     and fact["attempt_count"] is not None
+                     and fact["retained_liability_usd"] is not None)
+            retained = sum(usd_micros(value) for value in (
+                operation.future_usd, operation.active_usd, operation.unknown_usd,
+                operation.uncovered_excess_usd))
+            _require(usd_micros(Decimal(fact["retained_liability_usd"])) == retained)
+            # K is still visible in operation_accounting when total cost is unknown.
+            if retained:
+                _require(fact["known_cost_usd"] is None)
+            elif fact["known_cost_usd"] is not None:
+                _require(usd_micros(Decimal(fact["known_cost_usd"])) == usd_micros(operation.known_usd))
         committed = fact["policy_snapshot_sha256"] is not None and fact["ledger_snapshot_sha256"] is not None
         checks = fact["checks"]
         shape(checks, base_checks | staged_checks if committed else base_checks)
@@ -122,6 +145,12 @@ def validate_observations(document: dict, report, inputs: dict, *, shape, hash_v
                  and checks["no_observed_breach_or_conflict"] == (not accounting.halted and not accounting.conflict
                      and accounting.excess_usd == 0 and accounting.uncovered_excess_usd == 0)
                  and checks["committed_policy_and_ledger_observed"] == committed)
+        if fact["known_cost_usd"] is not None:
+            # The trusted collector verifies original settlement/staged-receipt
+            # proof. A bad public result may itself be an observed violation;
+            # do not discard the real committed charge in that failure record.
+            _require(operation is not None and committed and checks["actual_committed_join"]
+                     and fact["provider_receipt_sha256"] is not None)
         violations += sum(not passed for passed in checks.values())
         key = digest(fact)
         _require(key not in seen)

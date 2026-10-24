@@ -159,4 +159,21 @@ def _render_diagnostics(diagnostics: dict, *, output: TextIO) -> None:
         output.write(f"| {_label(row)} | {_cost(row['original_acquisition_cost'])} | "
                      f"{_cost(row['current_reuse_cost'])} | {_cost(row['current_input_cost'])} | "
                      f"{row['retained_liability_known_sum_usd']} |\n")
-    output.write("\n")
+    output.write("\nPer-operation observation snapshots preserve partial known K while total cost "
+                 "remains unavailable. F/A/U/D are unresolved exposure, not free usage. "
+                 "Authority cap is the original authority ceiling, not an operation wallet. "
+                 "These are per-fact snapshots and must not be summed as new spend; "
+                 "authority-wide exposure checks use the separate authority totals.\n\n")
+    output.write("| Operation | Partial K USD | F | A | U | D | Confirmed total USD | "
+                 "Retained USD | Attempts | Authority cap USD |\n"
+                 "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
+    for row in diagnostics["operation_accounting_observations"]:
+        scoped = row["operation_accounting"]
+        categories = (None,) * 5 if scoped is None else tuple(scoped[key] for key in (
+            "known_usd", "future_usd", "active_usd", "unknown_usd", "uncovered_excess_usd"))
+        output.write(f"| {_show(row['operation_id'])} | "
+                     + " | ".join(_show(value) for value in categories)
+                     + f" | {_show(row['known_cost_usd'])} | {_show(row['retained_liability_usd'])}"
+                     + f" | {_show(row['attempt_count'])} | {_show(None if scoped is None else scoped['cap_usd'])} |\n")
+    if not diagnostics["operation_accounting_observations"]:
+        output.write("\nOperation accounting observations unavailable; no healthy zero is inferred.\n")

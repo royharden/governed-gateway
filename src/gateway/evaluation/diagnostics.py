@@ -4,7 +4,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from decimal import Decimal
 
-from gateway.schemas.core import money_from_micros, usd_micros
+from gateway.schemas.accounting import AccountingTotals
+from gateway.schemas.core import ErrorCode, GatewayError, canonical_bytes, digest, money_from_micros, usd_micros
 from gateway.schemas.operator import AcquisitionReceipt, PairedDifference
 
 from .dataset import DevelopmentTask
@@ -13,6 +14,29 @@ from .dataset import DevelopmentTask
 FAMILIES = ("extraction", "evidence_qa", "transformation")
 ROUTES = ("B0", "B1", "C", "s3_offline")
 OUTCOMES = ("ok", "refused", "truncated", "provider_error", "cancelled", "timeout", "missing")
+
+
+def operation_accounting_observations(document: dict | None) -> tuple[dict, ...]:
+    """Per-fact projections; never aggregate repeated snapshots into new spend."""
+    if document is None:
+        return ()
+    try:
+        facts = document["facts"]
+        if type(facts) is not list or not 0 < len(facts) <= 4096:
+            raise ValueError("invalid_observation_facts")
+        rows = []
+        for fact in facts:
+            raw = fact["operation_accounting"]
+            scoped = None if raw is None else AccountingTotals.model_validate_json(canonical_bytes(raw))
+            if scoped is not None and canonical_bytes(scoped) != canonical_bytes(raw):
+                raise ValueError("invalid_operation_accounting")
+            rows.append({"fact_sha256": digest(fact), "operation_id": fact["operation_id"],
+                         "operation_accounting": scoped, "known_cost_usd": fact["known_cost_usd"],
+                         "retained_liability_usd": fact["retained_liability_usd"],
+                         "attempt_count": fact["attempt_count"]})
+        return tuple(rows)
+    except Exception:
+        raise GatewayError(ErrorCode.INVALID_EVIDENCE) from None
 
 
 def is_observed(receipt: AcquisitionReceipt | None) -> bool:
