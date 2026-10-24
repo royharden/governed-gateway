@@ -1,0 +1,409 @@
+"""Immutable body-free evaluation artifacts, exact joins and portable JSON bundles.
+
+The manifest binds the full report payload except its own manifest hash. The
+report's optional registration annotation must be absent at freeze/validation;
+the separately signed governance record binds this manifest rather than being
+embedded back into it. Artifact hashes establish identity, never authenticity.
+The exact limited simulation observation document is retained with its digest
+and count. Structural joins do not establish authenticity or independent execution.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from decimal import Decimal
+import hashlib
+import json
+import re
+
+from gateway.schemas.core import ErrorCode, GatewayError, canonical_bytes, digest, usd_micros
+from gateway.schemas.operator import EvaluationReport, PairedDifference
+
+from .diagnostics import FAMILIES, OUTCOMES, ROUTES
+from .observations import RECEIPT_FIELDS, amount, validate_observations
+
+
+@dataclass(frozen=True)
+class EvaluationArtifacts:
+    """Own immutable canonical bytes; no mutable decoded dictionaries are retained."""
+    manifest_canonical: bytes
+    diagnostics_canonical: bytes
+    invariant_canonical: bytes | None = None
+
+
+def _require(condition: bool) -> None:
+    if not condition:
+        raise GatewayError(ErrorCode.INVALID_EVIDENCE)
+
+
+def _shape(value, keys: set[str]) -> None:
+    _require(type(value) is dict and set(value) == keys)
+
+
+def _hash(value, *, nullable: bool = False) -> None:
+    _require((nullable and value is None) or
+             (type(value) is str and re.fullmatch(r"[0-9a-f]{64}", value) is not None))
+
+
+def _identifier(value) -> None:
+    _require(type(value) is str and 1 <= len(value) <= 128
+             and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:@/-]*", value) is not None)
+
+
+def _count(value) -> None:
+    _require(type(value) is int and value >= 0)
+
+
+def _utc(value) -> datetime:
+    _require(type(value) is str and re.fullmatch(
+        r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z", value) is not None)
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    _require(parsed.tzinfo == timezone.utc)
+    return parsed
+
+
+def _decode(raw: bytes) -> dict:
+    _require(type(raw) is bytes and 0 < len(raw) <= 2097152)
+    value = json.loads(raw, object_pairs_hook=_unique_object)
+    _require(type(value) is dict and canonical_bytes(value) == raw)
+    return value
+
+
+def _unique_object(pairs: list[tuple[str, object]]) -> dict:
+    result = {}
+    for key, value in pairs:
+        _require(key not in result)
+        result[key] = value
+    return result
+
+
+def report_payload(report: EvaluationReport) -> dict:
+    """Every frozen report field except the self-reference; no registration cycle."""
+    _require(report.registered_evaluation is None)
+    return report.model_dump(mode="python", exclude={"artifact_manifest_sha256"}, exclude_none=False)
+
+
+def _freeze_artifacts(report_fields: dict, diagnostics: dict, inputs: dict,
+                      invariant_canonical: bytes | None = None) -> EvaluationArtifacts:
+    """Scorer-private construction. Public validation happens after report creation."""
+    _require("artifact_manifest_sha256" not in report_fields
+             and report_fields.get("registered_evaluation") is None)
+    diagnostic_bytes = canonical_bytes(diagnostics)
+    manifest = {
+        "schema_version": 1, "kind": "development_evaluation_artifact_manifest",
+        "report_payload": report_fields, "diagnostics_sha256": digest(diagnostics),
+        "authority_invariant_evidence_sha256": report_fields["authority_invariant_evidence_sha256"],
+        "authority_violation_count": report_fields["authority_violation_count"],
+        "authority_binding": diagnostics["authority_binding"],
+        "inputs": inputs,
+    }
+    return EvaluationArtifacts(canonical_bytes(manifest), diagnostic_bytes, invariant_canonical)
+
+
+def artifact_manifest_sha256(artifacts: EvaluationArtifacts) -> str:
+    return hashlib.sha256(artifacts.manifest_canonical).hexdigest()
+
+
+def _validate_cost(value: dict) -> None:
+    _shape(value, {"eligible_count", "known_count", "unknown_count", "known_sum_usd", "total_usd"})
+    for field in ("eligible_count", "known_count", "unknown_count"):
+        _count(value[field])
+    _require(value["known_count"] + value["unknown_count"] == value["eligible_count"])
+    for field in ("known_sum_usd", "total_usd"):
+        amount = value[field]
+        if amount is not None:
+            _require(type(amount) is str and re.fullmatch(r"(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?", amount) is not None)
+            usd_micros(Decimal(amount))
+    _require((value["known_sum_usd"] is None) == (value["known_count"] == 0))
+    complete = value["eligible_count"] > 0 and value["unknown_count"] == 0
+    _require((value["total_usd"] is not None) == complete)
+    if complete:
+        _require(value["total_usd"] == value["known_sum_usd"])
+
+
+_SUMMARY_COUNTS = {
+    "assigned_count", "receipt_count", "observed_count", "success_count", "scoring_failure_count",
+    "terminal_failure_count", "missing_receipt_count", "missing_observation_count", "unknown_outcome_count",
+    "unscorable_ok_count", "reused_receipt_count", "original_receipt_count",
+    "attempted_call_count_known_subtotal", "attempted_call_count_unknown_slots", "reuse_attempt_count",
+    "historical_source_attempt_count", "current_reuse_not_applicable_count", "retained_liability_unknown_slots",
+}
+
+
+def _validate_summary(summary: dict) -> None:
+    _shape(summary, _SUMMARY_COUNTS | {"route", "family", "outcome_counts", "original_acquisition_cost",
+                                    "current_reuse_cost", "current_input_cost", "retained_liability_known_sum_usd"})
+    _require(summary["route"] in (*ROUTES, "acquisition_input")
+             and summary["family"] in (*FAMILIES, None))
+    for field in _SUMMARY_COUNTS:
+        _count(summary[field])
+    outcomes = summary["outcome_counts"]
+    _shape(outcomes, set(OUTCOMES))
+    for count in outcomes.values():
+        _count(count)
+    n, received, observed = summary["assigned_count"], summary["receipt_count"], summary["observed_count"]
+    _require(sum(outcomes.values()) == received <= n and observed <= received
+             and summary["success_count"] <= observed
+             and summary["scoring_failure_count"] == observed - summary["success_count"]
+             and summary["unscorable_ok_count"] <= outcomes["ok"]
+             and observed == received - outcomes["missing"] - summary["unscorable_ok_count"]
+             and summary["terminal_failure_count"] == sum(outcomes[key] for key in OUTCOMES
+                                                         if key not in ("ok", "missing"))
+             and summary["missing_receipt_count"] == n - received
+             and summary["missing_observation_count"] == summary["unknown_outcome_count"] == n - observed
+             and summary["reused_receipt_count"] + summary["original_receipt_count"] == received
+             and summary["current_reuse_not_applicable_count"] == summary["original_receipt_count"]
+             and summary["attempted_call_count_unknown_slots"] == n - received
+             and summary["retained_liability_unknown_slots"] == n - received
+             and summary["reuse_attempt_count"] == 0)
+    for field in ("original_acquisition_cost", "current_reuse_cost", "current_input_cost"):
+        _validate_cost(summary[field])
+    original, reuse, current = (summary[key] for key in
+                                ("original_acquisition_cost", "current_reuse_cost", "current_input_cost"))
+    _require(original["eligible_count"] == current["eligible_count"] == n
+             and original["unknown_count"] >= n - received
+             and current["unknown_count"] >= n - received
+             and reuse["eligible_count"] == reuse["known_count"] == summary["reused_receipt_count"]
+             and reuse["unknown_count"] == 0
+             and (reuse["known_sum_usd"] == "0" if reuse["eligible_count"] else reuse["known_sum_usd"] is None))
+    liability = summary["retained_liability_known_sum_usd"]
+    _require(type(liability) is str and re.fullmatch(r"(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?", liability) is not None)
+
+
+def _validate_inputs(inputs: dict, report: EvaluationReport) -> None:
+    _shape(inputs, {"dependencies", "verified_spec_sha256", "baseline_target_id", "second_target_id",
+                    "target_provenance", "task_identities", "acquisition_identities", "reuse_source_sha256",
+                    "reuse_source_identities", "authority_id"})
+    _identifier(inputs["authority_id"])
+    _require(canonical_bytes(inputs["dependencies"]) == canonical_bytes(report.tuple))
+    _hash(inputs["verified_spec_sha256"], nullable=True)
+    _require(inputs["verified_spec_sha256"] in (None, report.evaluation_spec_sha256))
+    targets = {inputs["baseline_target_id"], inputs["second_target_id"]}
+    _require(len(targets) == 2)
+    for target in targets:
+        _identifier(target)
+    provenance = inputs["target_provenance"]
+    _require(type(provenance) is list and len(provenance) == 2)
+    by_target = {}
+    for item in provenance:
+        _shape(item, {"target_id", "exact_model_sha256", "profile_sha256", "adapter_sha256", "price_sha256", "bound_sha256"})
+        _identifier(item["target_id"])
+        for field in set(item) - {"target_id"}:
+            _hash(item[field])
+        _require(item["target_id"] not in by_target
+                 and item["price_sha256"] == report.tuple.price_sha256
+                 and item["bound_sha256"] == report.tuple.bound_sha256)
+        by_target[item["target_id"]] = item
+    _require(set(by_target) == targets)
+    tasks = inputs["task_identities"]
+    _require(type(tasks) is list and len(tasks) == report.task_count == 60)
+    by_task = {}
+    for task in tasks:
+        _shape(task, {"task_id", "family", "source_id", "template_id", "content_sha256", "request_sha256",
+                      "parameters_sha256", "candidate_target_id"})
+        for field in ("task_id", "source_id", "template_id", "candidate_target_id"):
+            _identifier(task[field])
+        for field in ("content_sha256", "request_sha256", "parameters_sha256"):
+            _hash(task[field])
+        _require(task["family"] in FAMILIES and task["candidate_target_id"] in targets
+                 and task["task_id"] not in by_task)
+        by_task[task["task_id"]] = task
+    _require(all(sum(task["family"] == family for task in tasks) == 20 for family in FAMILIES))
+    acquisitions = inputs["acquisition_identities"]
+    _require(type(acquisitions) is list and len(acquisitions) <= report.task_count * 2)
+    source_items = inputs["reuse_source_identities"]
+    _require(type(source_items) is list and len(source_items) <= len(acquisitions))
+
+    def validate_identity(item: dict) -> None:
+        _shape(item, RECEIPT_FIELDS)
+        for field in ("acquisition_id", "task_id", "target_id"):
+            _identifier(item[field])
+        _require(item["task_id"] in by_task and item["target_id"] in targets)
+        for field in ("receipt_sha256", "request_sha256", "parameters_sha256", "exact_model_sha256",
+                      "profile_sha256", "adapter_sha256", "price_sha256", "bound_sha256"):
+            _hash(item[field])
+        _hash(item["provider_receipt_sha256"], nullable=True)
+        _hash(item["response_text_sha256"], nullable=True)
+        _hash(item["reuse_source_sha256"], nullable=True)
+        _require(type(item["reused"]) is bool and item["reused"] == (item["reuse_source_sha256"] is not None))
+        _require(item["request_sha256"] == by_task[item["task_id"]]["request_sha256"]
+                 and item["parameters_sha256"] == by_task[item["task_id"]]["parameters_sha256"]
+                 and all(item[field] == by_target[item["target_id"]][field] for field in
+                         ("exact_model_sha256", "profile_sha256", "adapter_sha256", "price_sha256", "bound_sha256"))
+                 and _utc(item["acquired_utc"]) <= report.frozen_utc
+                 and _utc(item["fresh_until_utc"]) >= report.expires_utc)
+        _require(item["mode"] == "simulation" and item["synthetic"] is True
+                 and item["outcome_status"] in OUTCOMES)
+        _count(item["attempt_count"])
+        if item["response_ref"] is not None:
+            _identifier(item["response_ref"])
+        for field in ("original_acquisition_cost_usd", "current_reuse_cost_usd", "known_cost_usd", "latency_ms"):
+            amount(item[field], nullable=True)
+        amount(item["retained_liability_usd"])
+        _require(item["known_cost_usd"] == item["original_acquisition_cost_usd"]
+                 and (item["current_reuse_cost_usd"] == "0" and item["attempt_count"] == 0
+                      if item["reused"] else item["current_reuse_cost_usd"] is None))
+        if item["outcome_status"] == "missing":
+            _require(item["response_ref"] is None and item["response_text_sha256"] is None
+                     and item["known_cost_usd"] is None)
+
+    by_source = {}
+    for item in source_items:
+        validate_identity(item)
+        _require(not item["reused"] and item["receipt_sha256"] not in by_source)
+        by_source[item["receipt_sha256"]] = item
+    seen_slots, seen_ids, sources = set(), set(), set()
+    joined_fields = RECEIPT_FIELDS - {"acquisition_id", "receipt_sha256", "reused", "reuse_source_sha256",
+        "acquired_utc", "fresh_until_utc", "current_reuse_cost_usd", "attempt_count"}
+    for item in acquisitions:
+        validate_identity(item)
+        slot = (item["task_id"], item["target_id"])
+        _require(slot not in seen_slots and item["acquisition_id"] not in seen_ids)
+        seen_slots.add(slot)
+        seen_ids.add(item["acquisition_id"])
+        if item["reused"]:
+            sources.add(item["reuse_source_sha256"])
+            source = by_source.get(item["reuse_source_sha256"])
+            _require(source is not None and all(item[field] == source[field] for field in joined_fields)
+                     and _utc(source["acquired_utc"]) <= _utc(item["acquired_utc"])
+                     and _utc(source["fresh_until_utc"]) >= _utc(item["fresh_until_utc"]))
+    _require(type(inputs["reuse_source_sha256"]) is list
+             and inputs["reuse_source_sha256"] == sorted(sources) and set(by_source) == sources)
+
+
+def _validate_diagnostics(diagnostics: dict, report: EvaluationReport, inputs: dict) -> None:
+    _shape(diagnostics, {"schema_version", "kind", "report_id", "evaluation_spec_sha256", "corpus_manifest_sha256",
+                         "authorization_sha256", "mode", "synthetic", "interpretation", "authority_status",
+                         "authority_invariant_evidence_sha256", "authority_violation_count", "promotion_status",
+                         "authority_binding",
+                         "call_count_semantics", "offline_semantics", "acquisition_summary", "route_summaries",
+                         "paired_statistical_differences"})
+    established = (report.authority_invariant_evidence_sha256 is not None
+                   and report.authority_violation_count is not None)
+    _require(diagnostics["authority_binding"] == {
+        "candidate_policy_sha256": report.tuple.policy_bundle_sha256,
+        "scope": "developer-owned-limited-observations",
+        "scope_verification": "canonical_identity_and_receipt_joins_only"
+            if established else "authority_not_established"})
+    _require(type(diagnostics["schema_version"]) is int and diagnostics["schema_version"] == 1
+             and diagnostics["kind"] == "development_evaluation_diagnostics"
+             and diagnostics["report_id"] == report.report_id
+             and diagnostics["evaluation_spec_sha256"] == report.evaluation_spec_sha256
+             and diagnostics["corpus_manifest_sha256"] == report.corpus_manifest_sha256
+             and diagnostics["authorization_sha256"] == report.authorization_sha256
+             and diagnostics["mode"] == report.mode == "simulation"
+             and diagnostics["synthetic"] is True and report.synthetic
+             and diagnostics["interpretation"] == "statistical_only"
+             and diagnostics["authority_status"] == ("authority_evidence_recorded" if established else "authority_not_established")
+             and diagnostics["authority_invariant_evidence_sha256"] == report.authority_invariant_evidence_sha256
+             and diagnostics["authority_violation_count"] == report.authority_violation_count
+             and diagnostics["promotion_status"] == "not_established"
+             and diagnostics["call_count_semantics"] == "input_receipt_attempts_known_subtotal"
+             and diagnostics["offline_semantics"] == "same_candidate_selector_zero_acquisitions")
+    overall = diagnostics["acquisition_summary"]
+    _validate_summary(overall)
+    _require(overall["route"] == "acquisition_input" and overall["family"] is None
+             and overall["assigned_count"] == report.task_count * 2
+             and overall["receipt_count"] == len(inputs["acquisition_identities"])
+             and overall["missing_observation_count"] == report.missing_observation_count
+             and overall["attempted_call_count_known_subtotal"] == report.attempt_count
+             and overall["reused_receipt_count"] == sum(item["reused"] for item in inputs["acquisition_identities"]))
+    summaries = diagnostics["route_summaries"]
+    _require(type(summaries) is list and len(summaries) == len(report.route_rows) == 16)
+    by_row = {(row.route, row.family): row for row in report.route_rows}
+    seen = set()
+    for summary in summaries:
+        _validate_summary(summary)
+        key = (summary["route"], summary["family"])
+        _require(key in by_row and key not in seen)
+        seen.add(key)
+        row = by_row[key]
+        _require(summary["assigned_count"] == row.success.assigned_count
+                 and summary["observed_count"] == row.success.observed_count
+                 and summary["success_count"] == row.success.success_count
+                 and summary["original_acquisition_cost"]["known_count"] == row.cost_known_count
+                 and canonical_bytes(summary["original_acquisition_cost"]["known_sum_usd"]) == canonical_bytes(row.known_cost_sum_usd)
+                 and canonical_bytes(summary["original_acquisition_cost"]["total_usd"]) == canonical_bytes(row.total_cost_usd)
+                 and canonical_bytes(summary["retained_liability_known_sum_usd"]) == canonical_bytes(row.retained_liability_usd))
+    pairs = diagnostics["paired_statistical_differences"]
+    _require(type(pairs) is list and len(pairs) == 3)
+    validated = tuple(PairedDifference.model_validate_json(canonical_bytes(pair)) for pair in pairs)
+    _require({pair.family for pair in validated} == set(FAMILIES)
+             and len({pair.seed for pair in validated}) == 1
+             and all(canonical_bytes(raw) == canonical_bytes(pair) for raw, pair in zip(pairs, validated)))
+    for pair in validated:
+        _require(pair.paired_count + pair.missing_pair_count == by_row[("C", pair.family)].success.assigned_count)
+    diagnostic_pairs = {pair.family: pair for pair in validated}
+    for pair in report.paired_differences:
+        _require(pair == diagnostic_pairs[pair.family])
+    if not established:
+        _require(report.status == report.compatibility_status == "inconclusive" and not report.paired_differences)
+
+
+def validate_artifacts(report: EvaluationReport, artifacts: EvaluationArtifacts) -> dict:
+    """Validate exact canonical bytes, manifest/hash joins and complete report identity.
+
+    Return a new safe decoded diagnostics dictionary. This is structural evidence
+    validation, not proof that invariant evidence was independently executed.
+    """
+    try:
+        _require(type(artifacts) is EvaluationArtifacts)
+        # Revalidation also catches a caller using model_copy to bypass validators.
+        verified = EvaluationReport.model_validate_json(canonical_bytes(report))
+        manifest = _decode(artifacts.manifest_canonical)
+        diagnostics = _decode(artifacts.diagnostics_canonical)
+        _shape(manifest, {"schema_version", "kind", "report_payload", "diagnostics_sha256",
+                          "authority_invariant_evidence_sha256", "authority_violation_count", "authority_binding", "inputs"})
+        _require(type(manifest["schema_version"]) is int and manifest["schema_version"] == 1
+                 and manifest["kind"] == "development_evaluation_artifact_manifest"
+                 and artifact_manifest_sha256(artifacts) == verified.artifact_manifest_sha256
+                 and canonical_bytes(manifest["report_payload"]) == canonical_bytes(report_payload(verified))
+                 and manifest["diagnostics_sha256"] == hashlib.sha256(artifacts.diagnostics_canonical).hexdigest()
+                 and manifest["authority_invariant_evidence_sha256"] == verified.authority_invariant_evidence_sha256
+                 and manifest["authority_violation_count"] == verified.authority_violation_count)
+        _require(manifest["authority_binding"] == diagnostics["authority_binding"])
+        _validate_inputs(manifest["inputs"], verified)
+        supplied = (verified.authority_invariant_evidence_sha256 is not None,
+                    verified.authority_violation_count is not None, artifacts.invariant_canonical is not None)
+        _require(all(supplied) or not any(supplied))
+        if artifacts.invariant_canonical is not None:
+            invariant = _decode(artifacts.invariant_canonical)
+            _require(hashlib.sha256(artifacts.invariant_canonical).hexdigest()
+                     == verified.authority_invariant_evidence_sha256)
+            validate_observations(invariant, verified, manifest["inputs"], shape=_shape,
+                                  hash_value=_hash, identifier=_identifier, count=_count, utc=_utc)
+        _validate_diagnostics(diagnostics, verified, manifest["inputs"])
+        return diagnostics
+    except GatewayError:
+        raise
+    except Exception:
+        raise GatewayError(ErrorCode.INVALID_EVIDENCE) from None
+
+
+def report_bundle_json(report: EvaluationReport, artifacts: EvaluationArtifacts) -> str:
+    """Portable safe report plus visible manifest/diagnostics, never receipt bodies."""
+    diagnostics = validate_artifacts(report, artifacts)
+    return canonical_bytes({"report": report, "artifacts": {
+        "manifest": _decode(artifacts.manifest_canonical), "diagnostics": diagnostics,
+        "invariant": None if artifacts.invariant_canonical is None else
+            _decode(artifacts.invariant_canonical)}}).decode("utf-8") + "\n"
+
+
+def read_report_bundle(raw: str | bytes) -> tuple[EvaluationReport, EvaluationArtifacts]:
+    """Strict bundled input; bare reports cannot satisfy artifact-bound registration."""
+    try:
+        _require(type(raw) in (str, bytes) and len(raw) <= 4194304)
+        bundle = json.loads(raw, object_pairs_hook=_unique_object)
+        _shape(bundle, {"report", "artifacts"})
+        _shape(bundle["artifacts"], {"manifest", "diagnostics", "invariant"})
+        report = EvaluationReport.model_validate_json(canonical_bytes(bundle["report"]))
+        artifacts = EvaluationArtifacts(canonical_bytes(bundle["artifacts"]["manifest"]),
+                                        canonical_bytes(bundle["artifacts"]["diagnostics"]),
+                                        None if bundle["artifacts"]["invariant"] is None else
+                                            canonical_bytes(bundle["artifacts"]["invariant"]))
+        validate_artifacts(report, artifacts)
+        return report, artifacts
+    except GatewayError:
+        raise
+    except Exception:
+        raise GatewayError(ErrorCode.INVALID_EVIDENCE) from None

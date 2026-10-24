@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "source_decision": "ROY-GATES-006",
+  "status": "incomplete_live_bound_evidence",
+  "spend_authorized": false,
+  "key_requests_authorized": false,
+  "aggregate_future_ceiling_usd": "30",
+  "tranches": [
+    {"purpose": "development", "ceiling_usd": "1"},
+    {"purpose": "acceptance", "ceiling_usd": "24"},
+    {"purpose": "reserve", "ceiling_usd": "5", "release_authorized": false}
+  ],
+  "per_provider_wallets": false,
+  "future_candidates_unverified": [
+    {"provider": "openai", "exact_model_candidate": "gpt-6-luna", "profile": "fixed_nonreasoning"},
+    {"provider": "anthropic", "exact_model_candidate": "claude-haiku-5-5", "profile": "direct_messages"}
+  ],
+  "minimum_heldout_tasks": 120,
+  "static_routes": 2,
+  "minimum_heldout_generation_executions": 240,
+  "minimum_smoke_executions": 20,
+  "additional_components": ["controlled_failure", "development", "potentially_billed_count", "explicit_retry"],
+  "expected_cost_usd": null,
+  "conservative_maximum_liability_usd": null,
+  "current_price_evidence_sha256": null,
+  "complete_serialized_request_bound_sha256": null,
+  "feasible": null,
+  "reason": "Recorded loose full-context fallback exceeds the future aggregate ceiling. A tighter evidenced complete-serialized-request bound is required. No current model support, rates or availability verified.",
+  "unknown_liability_refund": false,
+  "lower_acceptance_floor": false,
+  "synthetic_substitution_for_live_acceptance": false
+}

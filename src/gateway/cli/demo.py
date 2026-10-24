@@ -1,0 +1,156 @@
+"""No-key demonstration orchestration SOURCE; no evaluation or durable success is seeded."""
+from __future__ import annotations
+
+import argparse
+import asyncio
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+import sys
+from typing import TextIO
+
+
+from gateway.schemas import (
+    ApprovalRecord, CallerContext, ChatCompletionInput, ErrorCode, EvaluationAuthorization, EvaluationRecord,
+    GatewayError, GatewayReply, GatewayRequest, PolicyBundle, canonical_bytes, digest,
+)
+from gateway.schemas.operator import EvaluationReport, ShadowRecord
+from gateway.cli.operator import OperatorServices, activate, register_evaluation, rollback
+from gateway.cli.reports import render_overview
+from gateway.evaluation.artifacts import EvaluationArtifacts
+from gateway.controller.ports import CancellationToken
+from gateway.controller.service import GatewayController
+
+
+def controller_request(controller: GatewayController, *, caller: CallerContext
+                       ) -> Callable[[GatewayRequest], Awaitable[GatewayReply]]:
+    """Bind the concrete controller seam using a trusted configured demo caller."""
+    async def request(value: GatewayRequest) -> GatewayReply:
+        if (value.authority_id, value.caller_id) != (caller.authority_id, caller.caller_id):
+            raise GatewayError(ErrorCode.FORBIDDEN)
+        body = ChatCompletionInput(model=value.route_alias, messages=value.messages,
+                                   max_completion_tokens=value.max_completion_tokens, stream=False, n=1)
+        # Controller derives clock/deadline and checks original idempotency; no direct adapter call.
+        return await controller.complete(caller, body, value.idempotency_key, cancel=CancellationToken())
+    return request
+
+
+@dataclass(frozen=True)
+class DemoPolicyEvidence:
+    """Inputs must come from an actual future authorized synthetic evaluation/signing run."""
+    bundle: PolicyBundle
+    authorization: EvaluationAuthorization
+    report: EvaluationReport
+    evaluation: EvaluationRecord
+    approval: ApprovalRecord
+    artifacts: EvaluationArtifacts
+
+
+@dataclass(frozen=True)
+class DemoServices:
+    operator: OperatorServices
+    evaluate_and_sign: Callable[[str], Awaitable[DemoPolicyEvidence]]
+    # Composition adapts the actual authenticated controller/API entrypoint, never an adapter direct call.
+    request: Callable[[GatewayRequest], Awaitable[GatewayReply]]
+    original_request: GatewayRequest
+    boundary_request: GatewayRequest
+    shadow: Callable[[GatewayRequest, GatewayReply], ShadowRecord]
+    # Trusted spy snapshot; comparison is a demo observation, not independent acceptance evidence.
+    dispatched_attempt_count: Callable[[], int]
+
+
+def _admit_policy(services: OperatorServices, evidence: DemoPolicyEvidence) -> str:
+    if (evidence.authorization.mode != "simulation" or evidence.report.mode != "simulation"
+            or evidence.evaluation.mode != "simulation"
+            or evidence.authorization.tuple.policy_bundle_sha256 != digest(evidence.bundle)
+            or evidence.approval.tuple != evidence.authorization.tuple
+            or evidence.approval.evaluation_sha256 != digest(evidence.evaluation)
+            or evidence.approval.artifact_manifest_sha256 != evidence.report.artifact_manifest_sha256
+            or evidence.approval.decision != "approve"):
+        raise GatewayError(ErrorCode.INVALID_EVIDENCE)
+    services.governance.freeze(evidence.bundle)
+    services.governance.authorize_evaluation(evidence.authorization)
+    evaluation_hash = register_evaluation(services, evidence.report, evidence.authorization, evidence.evaluation,
+                                          artifacts=evidence.artifacts)
+    if evaluation_hash != evidence.approval.evaluation_sha256:
+        raise GatewayError(ErrorCode.INVALID_APPROVAL)
+    return services.governance.verify_approval(evidence.approval)
+
+
+async def run_demo(services: DemoServices, *, output: TextIO) -> None:
+    output.write("SIMULATION ONLY. Synthetic source journey; runtime/product acceptance remains unverified.\n")
+    initial = services.operator.overview()
+    if initial.generation != 0 or initial.active_policy_sha256 is not None:
+        raise GatewayError(ErrorCode.GENERATION_CONFLICT)
+    baseline = await services.evaluate_and_sign("baseline")
+    baseline_approval = _admit_policy(services.operator, baseline)
+    genesis = activate(services.operator, baseline_approval, expected_generation=None)
+    render_overview(services.operator.overview(), output=output)
+    first = await services.request(services.original_request)
+    if first.http_status != 200 or first.result is None or first.result.replayed:
+        raise GatewayError(ErrorCode.INVALID_TRANSITION)
+    # No normalized response bodies are emitted into demo operational output.
+    output.write(canonical_bytes({"stage": "request", "operation_id": first.operation_id,
+                                  "policy_sha256": first.result.policy_bundle_sha256,
+                                  "cost": first.result.cost}).decode("utf-8") + "\n")
+    calls = services.dispatched_attempt_count()
+    duplicate = await services.request(services.original_request)
+    if (duplicate.http_status != 200 or duplicate.result is None or not duplicate.result.replayed
+            or duplicate.operation_id != first.operation_id
+            or duplicate.result.model_dump(exclude={"replayed"}) != first.result.model_dump(exclude={"replayed"})
+            or services.dispatched_attempt_count() != calls):
+        raise GatewayError(ErrorCode.INVALID_TRANSITION)
+    output.write("Original retained result replayed; no second dispatch observed by supplied demo counter.\n")
+    if services.boundary_request.idempotency_key == services.original_request.idempotency_key:
+        raise GatewayError(ErrorCode.IDEMPOTENCY_CONFLICT)
+    rejected = await services.request(services.boundary_request)
+    if (rejected.http_status != 429 or rejected.code not in (ErrorCode.BUDGET_REJECTED, ErrorCode.BUDGET_EXCEEDED)
+            or services.dispatched_attempt_count() != calls):
+        raise GatewayError(ErrorCode.INVALID_TRANSITION)
+    output.write("Boundary request rejected for budget without another dispatch.\n")
+    shadow = services.shadow(services.original_request, first)
+    if (shadow.recommendation_status != "eligible" or shadow.agreement is not False
+            or shadow.outcome_status != "different_target_unobserved"
+            or services.dispatched_attempt_count() != calls):
+        raise GatewayError(ErrorCode.INVALID_TRANSITION)
+    output.write(canonical_bytes(shadow).decode("utf-8") + "\n")
+    candidate = await services.evaluate_and_sign("candidate")
+    candidate_approval = _admit_policy(services.operator, candidate)
+    exposure_before_activation = services.operator.overview().accounting
+    changed = activate(services.operator, candidate_approval, expected_generation=genesis.generation)
+    # Recheck normal eligibility, including freshness/nonrevocation; rollback has no waiver.
+    restored = rollback(services.operator, baseline_approval, expected_generation=changed.generation,
+                        reason="synthetic demonstration rollback")
+    if restored.policy_bundle_sha256 != digest(baseline.bundle):
+        raise GatewayError(ErrorCode.INVALID_TRANSITION)
+    try:
+        activate(services.operator, candidate_approval, expected_generation=genesis.generation)
+    except GatewayError as error:
+        if error.code != ErrorCode.GENERATION_CONFLICT:
+            raise
+    else:
+        raise GatewayError(ErrorCode.GENERATION_CONFLICT)
+    if services.operator.overview().accounting != exposure_before_activation:
+        raise GatewayError(ErrorCode.INVALID_EVIDENCE)
+    output.write("Candidate activated then eligible baseline restored at a new generation; stale CAS rejected.\n")
+    render_overview(services.operator.overview(), output=output)
+
+
+def main(argv: Sequence[str] | None = None, *, services: DemoServices | None = None) -> int:
+    parser = argparse.ArgumentParser(description="No-key synthetic M8 demo source; runtime unverified")
+    parser.parse_args(argv)
+    try:
+        if services is None:
+            raise GatewayError(ErrorCode.DEPENDENCY_UNAVAILABLE)
+        asyncio.run(run_demo(services, output=sys.stdout))
+        return 0
+    except GatewayError as error:
+        sys.stderr.write(canonical_bytes({"error": error.code.value}).decode("utf-8") + "\n")
+        return 2
+    except (OSError, ValueError, TypeError, ImportError):
+        sys.stderr.write('{"error":"dependency_unavailable"}\n')
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
