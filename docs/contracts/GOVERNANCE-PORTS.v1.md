@@ -1,0 +1,11 @@
+# Governance ports v1 — source construction
+
+INT approves exact public signatures/type names in outer agentops/assignments/DL3-GOVERNANCE-PLAN.md SHA2568d87fbcd358bdfdd87d069e0f008091d8e99f4de4e5c701db9a4dcf7168bba2d. This is the frozen provisional governance interface for all M8 producers/consumers; DL3 may implement against it. Exact definitions are implemented solely in gateway.schemas, delegated by INT to child0017; unresolved imports remain explicit until source reconciliation, never replaced by private models.
+
+Source migration migrations/001_governance.sql is INT-owned and unexecuted. Version1 tables and columns are now the governance SQL contract. No runtime store is created by import. A future PolicyStore explicitly validates local nonsynced path, schema/config identity and trusted clock, enables foreign_keys/WAL, and applies/validates this migration. Use exact migration column names. All hash/canonical byte checks remain application obligations within BEGIN IMMEDIATE under the shared authority lock. IDs are scoped by authority; immutable canonical records conflict rather than overwrite. State/join columns are lifecycle projections; canonical permit bytes/hash remain immutable.
+
+Canonical helpers exported by gateway.schemas: canonical_bytes(value)->bytes; digest(value)->str. Shared safe error base GatewayError with closed code; PolicyError may be a local subclass carrying only a safe closed code. Pydantic2 models and tuple fields are strict/frozen. Decimal rates/amounts serialize canonically; no floats.
+
+Authority lock supplied by DL4 is reentrant and cross-process, shared by all mutation and stop/incident operations. Caller must not hand a unique ticket to transport outside the lock's halt/read/claim/handoff boundary. Release before response wait. LedgerJoin comes from committed DL1 projection; struct equality alone never proves funding. No lost-ticket reconstruction or mock bootstrap external eligibility.
+
+Runtime clock helper and shared model source are construction dependencies in progress. Imports may remain unresolved during source construction; report exact reconciliation needs. No execution/acceptance claim. Changes to these signatures/DDL need INT-owned versioned addition; no competing schema or DL migration edits.
