@@ -1,0 +1,76 @@
+{
+  "source_revision_prefix": "bc2f54bce075",
+  "license": "MIT",
+  "files": [
+    {
+      "source": "handoffs/MPLAN-20261014-R01/final-001/payload/context/source-context/s-components/S3/LICENSE",
+      "vendored": "LICENSE",
+      "source_sha256": "431665582156c442d0448d1f5cd2e45663ab96e6cf098711ffa58c4bb01b69e6",
+      "vendored_sha256": "431665582156c442d0448d1f5cd2e45663ab96e6cf098711ffa58c4bb01b69e6",
+      "transform": "none"
+    },
+    {
+      "source": "handoffs/MPLAN-20261014-R01/final-001/payload/context/source-context/s-components/S3/src/llm_router_eval/shared/__init__.py",
+      "vendored": "__init__.py",
+      "source_sha256": "60913c6d12caa4ba9139d870ad493d4a68738580c996662d7ad7b8d71622e1b8",
+      "vendored_sha256": "60913c6d12caa4ba9139d870ad493d4a68738580c996662d7ad7b8d71622e1b8",
+      "transform": "none"
+    },
+    {
+      "source": "handoffs/MPLAN-20261014-R01/final-001/payload/context/source-context/s-components/S3/src/llm_router_eval/shared/callledger/ledger.py",
+      "vendored": "callledger/ledger.py",
+      "source_sha256": "fefa367871c857d0bec3fb92f83647a4e86044296d9d221c68d57d27e36f34f1",
+      "vendored_sha256": "fefa367871c857d0bec3fb92f83647a4e86044296d9d221c68d57d27e36f34f1",
+      "transform": "none"
+    },
+    {
+      "source": "handoffs/MPLAN-20261014-R01/final-001/payload/context/source-context/s-components/S3/src/llm_router_eval/shared/callledger/models.py",
+      "vendored": "callledger/models.py",
+      "source_sha256": "7274d1eebed5370460d83af6e4187cc74037d0ab600889219423dbcdd81277e7",
+      "vendored_sha256": "7274d1eebed5370460d83af6e4187cc74037d0ab600889219423dbcdd81277e7",
+      "transform": "none"
+    },
+    {
+      "source": "handoffs/MPLAN-20261014-R01/final-001/payload/context/source-context/s-components/S3/src/llm_router_eval/shared/callledger/pricing.py",
+      "vendored": "callledger/pricing.py",
+      "source_sha256": "daf38f487eeb70b48cc4025c54a19eea581a2d5d00084f534d9f2b9a55056c74",
+      "vendored_sha256": "daf38f487eeb70b48cc4025c54a19eea581a2d5d00084f534d9f2b9a55056c74",
+      "transform": "none"
+    },
+    {
+      "source": "handoffs/MPLAN-20261014-R01/final-001/payload/context/source-context/s-components/S3/src/llm_router_eval/shared/callledger/projection.py",
+      "vendored": "callledger/projection.py",
+      "source_sha256": "5c0194e299b2c58f85e745ac093063dcb89689ea162ba378a37afc48a0f4dc69",
+      "vendored_sha256": "5c0194e299b2c58f85e745ac093063dcb89689ea162ba378a37afc48a0f4dc69",
+      "transform": "none"
+    },
+    {
+      "source": "handoffs/MPLAN-20261014-R01/final-001/payload/context/source-context/s-components/S3/src/llm_router_eval/shared/callledger/README.md",
+      "vendored": "callledger/README.md",
+      "source_sha256": "1f4ce767a382aa08f10151990a1c697dbaba77d78f71aa03690a601ebba35e13",
+      "vendored_sha256": "1f4ce767a382aa08f10151990a1c697dbaba77d78f71aa03690a601ebba35e13",
+      "transform": "none"
+    },
+    {
+      "source": "handoffs/MPLAN-20261014-R01/final-001/payload/context/source-context/s-components/S3/src/llm_router_eval/shared/callledger/__init__.py",
+      "vendored": "callledger/__init__.py",
+      "source_sha256": "178bb3747269d1c9e313b8ff48515157542fd28d8371fbee2bec9b193ba1f735",
+      "vendored_sha256": "178bb3747269d1c9e313b8ff48515157542fd28d8371fbee2bec9b193ba1f735",
+      "transform": "none"
+    },
+    {
+      "source": "handoffs/MPLAN-20261014-R01/final-001/payload/context/source-context/s-components/S3/src/llm_router_eval/shared/providers/models.py",
+      "vendored": "providers/models.py",
+      "source_sha256": "919f6a305e9a8f5abda494901ce60228e99bf0240e7c514c177543f14b3c8965",
+      "vendored_sha256": "919f6a305e9a8f5abda494901ce60228e99bf0240e7c514c177543f14b3c8965",
+      "transform": "none"
+    },
+    {
+      "source": "handoffs/MPLAN-20261014-R01/final-001/payload/context/source-context/s-components/S3/src/llm_router_eval/shared/providers/__init__.py",
+      "vendored": "providers/__init__.py",
+      "source_sha256": "71abea7e827dec63934bf5d2c8b557d3e3dc24d32cc5da50561a5a178042e549",
+      "vendored_sha256": "71abea7e827dec63934bf5d2c8b557d3e3dc24d32cc5da50561a5a178042e549",
+      "transform": "none"
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "provenance": {
+    "origin": "synthetic",
+    "source_url": null,
+    "retrieved_at": "2026-10-24T00:00:00Z",
+    "official_verified_at": null,
+    "source_commit": null
+  },
+  "policies": [
+    {
+      "schema_version": 1,
+      "provider": "openai",
+      "model": "mock-openai-v1",
+      "context_sha256": "47fcfb70185e2e6b468ffd82f280f83a15b3071ebc60405290fcadecbd1ea680",
+      "cache_mode": "flat_inclusive",
+      "input_usd_per_million": "1",
+      "cache_read_usd_per_million": null,
+      "cache_write_usd_per_million": null,
+      "output_usd_per_million": "2",
+      "fee_usd": "0"
+    },
+    {
+      "schema_version": 1,
+      "provider": "anthropic",
+      "model": "mock-anthropic-v1",
+      "context_sha256": "a99f5d91a23cafb93342843e0077c16098a100fba6ce6a3bc30b71d0814fcf45",
+      "cache_mode": "flat_inclusive",
+      "input_usd_per_million": "1",
+      "cache_read_usd_per_million": null,
+      "cache_write_usd_per_million": null,
+      "output_usd_per_million": "2",
+      "fee_usd": "0"
+    }
+  ],
+  "data_sha256": "8c65a5353d98f84c184d8281631baa86ff6d06859d45fb5683c1a95c91cdd219"
+}

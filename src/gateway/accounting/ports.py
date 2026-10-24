@@ -1,0 +1,23 @@
+"""ACCOUNT-owned structural ports; shared records live only in gateway.schemas."""
+from datetime import datetime
+from typing import Protocol
+from gateway.schemas import (
+    AccountingIncident, IncidentReceipt, IncidentSnapshot, OperationPermit, UnstartedProof,
+)
+
+
+class AuthorityGuard(Protocol):
+    """The controller's reentrant OS authority lock, held through send handoff."""
+    def assert_held(self, *, authority_id: str) -> None: ...
+
+
+class AccountingGate(Protocol):
+    """Governance validates committed permits; caller DTOs alone are never proof."""
+    def validate_funding(self, permit: OperationPermit, *, now: datetime) -> None: ...
+    def validate_dispatch(self, *, operation_id: str, child_id: str,
+                          permit_sha256: str, now: datetime) -> None: ...
+    def incident_snapshot(self, *, authority_id: str) -> IncidentSnapshot: ...
+    def record_accounting_incident(self, incident: AccountingIncident) -> IncidentReceipt: ...
+    def authorize_unstarted(self, proof: UnstartedProof, *, now: datetime) -> None: ...
+
+    def operation_incident_snapshot(self, operation_id: str) -> IncidentSnapshot: ...

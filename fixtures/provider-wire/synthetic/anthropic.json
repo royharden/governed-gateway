@@ -1,0 +1,805 @@
+{
+  "schema_version": 1,
+  "mode": "simulation",
+  "live_evidence": false,
+  "provider": "anthropic",
+  "profile_model": "mock-anthropic-v1",
+  "notes": [
+    "Synthetic shapes only; no assertion of current real API/model/billing behavior.",
+    "Vectors are inert development data. Runtime/shared-schema consumer checks are deferred.",
+    "Expected monetary completeness is usage_complete; no fixture proves actual billed cost.",
+    "Model identity aligned to ACCOUNT synthetic_configuration profiles under SOURCE-READ-007; no separately authored runtime profile."
+  ],
+  "vectors": [
+    {
+      "id": "anthropic-serialize-one-user",
+      "kind": "serialize",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Synthetic question."
+        }
+      ],
+      "max_completion_tokens": 16,
+      "expected_payload": {
+        "model": "mock-anthropic-v1",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Synthetic question."
+          }
+        ],
+        "stream": false,
+        "max_tokens": 16
+      }
+    },
+    {
+      "id": "anthropic-serialize-system",
+      "kind": "serialize",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Synthetic rules."
+        },
+        {
+          "role": "user",
+          "content": "Synthetic question."
+        }
+      ],
+      "max_completion_tokens": 16,
+      "expected_payload": {
+        "model": "mock-anthropic-v1",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Synthetic question."
+          }
+        ],
+        "stream": false,
+        "max_tokens": 16,
+        "system": "Synthetic rules."
+      }
+    },
+    {
+      "id": "anthropic-serialize-alternating",
+      "kind": "serialize",
+      "messages": [
+        {
+          "role": "user",
+          "content": "A"
+        },
+        {
+          "role": "assistant",
+          "content": "B"
+        },
+        {
+          "role": "user",
+          "content": "C"
+        }
+      ],
+      "max_completion_tokens": 16,
+      "expected_payload": {
+        "model": "mock-anthropic-v1",
+        "messages": [
+          {
+            "role": "user",
+            "content": "A"
+          },
+          {
+            "role": "assistant",
+            "content": "B"
+          },
+          {
+            "role": "user",
+            "content": "C"
+          }
+        ],
+        "stream": false,
+        "max_tokens": 16
+      }
+    },
+    {
+      "id": "anthropic-serialize-unicode-cjk",
+      "kind": "serialize",
+      "messages": [
+        {
+          "role": "user",
+          "content": "你好。日本語。"
+        }
+      ],
+      "max_completion_tokens": 16,
+      "expected_payload": {
+        "model": "mock-anthropic-v1",
+        "messages": [
+          {
+            "role": "user",
+            "content": "你好。日本語。"
+          }
+        ],
+        "stream": false,
+        "max_tokens": 16
+      }
+    },
+    {
+      "id": "anthropic-serialize-emoji",
+      "kind": "serialize",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Synthetic 🧪🚦"
+        }
+      ],
+      "max_completion_tokens": 16,
+      "expected_payload": {
+        "model": "mock-anthropic-v1",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Synthetic 🧪🚦"
+          }
+        ],
+        "stream": false,
+        "max_tokens": 16
+      }
+    },
+    {
+      "id": "anthropic-serialize-punctuation",
+      "kind": "serialize",
+      "messages": [
+        {
+          "role": "user",
+          "content": "{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/"
+        }
+      ],
+      "max_completion_tokens": 16,
+      "expected_payload": {
+        "model": "mock-anthropic-v1",
+        "messages": [
+          {
+            "role": "user",
+            "content": "{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/"
+          }
+        ],
+        "stream": false,
+        "max_tokens": 16
+      }
+    },
+    {
+      "id": "anthropic-serialize-exact-whitespace",
+      "kind": "serialize",
+      "messages": [
+        {
+          "role": "user",
+          "content": "  A\r\nB\t  "
+        }
+      ],
+      "max_completion_tokens": 16,
+      "expected_payload": {
+        "model": "mock-anthropic-v1",
+        "messages": [
+          {
+            "role": "user",
+            "content": "  A\r\nB\t  "
+          }
+        ],
+        "stream": false,
+        "max_tokens": 16
+      }
+    },
+    {
+      "id": "anthropic-serialize-minimum-cap",
+      "kind": "serialize",
+      "messages": [
+        {
+          "role": "user",
+          "content": "A"
+        }
+      ],
+      "max_completion_tokens": 1,
+      "expected_payload": {
+        "model": "mock-anthropic-v1",
+        "messages": [
+          {
+            "role": "user",
+            "content": "A"
+          }
+        ],
+        "stream": false,
+        "max_tokens": 1
+      }
+    },
+    {
+      "id": "anthropic-serialize-maximum-cap",
+      "kind": "serialize",
+      "messages": [
+        {
+          "role": "user",
+          "content": "A"
+        }
+      ],
+      "max_completion_tokens": 1024,
+      "expected_payload": {
+        "model": "mock-anthropic-v1",
+        "messages": [
+          {
+            "role": "user",
+            "content": "A"
+          }
+        ],
+        "stream": false,
+        "max_tokens": 1024
+      }
+    },
+    {
+      "id": "anthropic-normalize-success",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-anthropic-v1",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "Synthetic answer."
+          }
+        ],
+        "stop_reason": "end_turn",
+        "usage": {
+          "input_tokens": 8,
+          "output_tokens": 4
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "usage_complete": true,
+        "error_code": null,
+        "expected_text": "Synthetic answer.",
+        "input_tokens": 8,
+        "output_tokens": 4
+      }
+    },
+    {
+      "id": "anthropic-normalize-cjk",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-anthropic-v1",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "你好。"
+          }
+        ],
+        "stop_reason": "end_turn",
+        "usage": {
+          "input_tokens": 8,
+          "output_tokens": 4
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "usage_complete": true,
+        "error_code": null,
+        "expected_text": "你好。"
+      }
+    },
+    {
+      "id": "anthropic-normalize-emoji",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-anthropic-v1",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "Synthetic 🧪"
+          }
+        ],
+        "stop_reason": "end_turn",
+        "usage": {
+          "input_tokens": 8,
+          "output_tokens": 4
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "usage_complete": true,
+        "error_code": null,
+        "expected_text": "Synthetic 🧪"
+      }
+    },
+    {
+      "id": "anthropic-normalize-punctuation",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-anthropic-v1",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "{}[]!?"
+          }
+        ],
+        "stop_reason": "end_turn",
+        "usage": {
+          "input_tokens": 8,
+          "output_tokens": 4
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "usage_complete": true,
+        "error_code": null,
+        "expected_text": "{}[]!?"
+      }
+    },
+    {
+      "id": "anthropic-normalize-empty-output",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-anthropic-v1",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": ""
+          }
+        ],
+        "stop_reason": "end_turn",
+        "usage": {
+          "input_tokens": 8,
+          "output_tokens": 4
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "usage_complete": true,
+        "error_code": null,
+        "expected_text": ""
+      }
+    },
+    {
+      "id": "anthropic-normalize-truncation",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-anthropic-v1",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "Synthetic answer."
+          }
+        ],
+        "stop_reason": "max_tokens",
+        "usage": {
+          "input_tokens": 8,
+          "output_tokens": 4
+        }
+      },
+      "expected": {
+        "status": "truncated",
+        "usage_complete": true,
+        "error_code": null
+      }
+    },
+    {
+      "id": "anthropic-normalize-refusal",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-anthropic-v1",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "Synthetic refusal."
+          }
+        ],
+        "stop_reason": "refusal",
+        "usage": {
+          "input_tokens": 8,
+          "output_tokens": 4
+        }
+      },
+      "expected": {
+        "status": "refused",
+        "usage_complete": true,
+        "error_code": null
+      }
+    },
+    {
+      "id": "anthropic-normalize-usage-absent",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-anthropic-v1",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "Synthetic answer."
+          }
+        ],
+        "stop_reason": "end_turn"
+      },
+      "expected": {
+        "status": "ok",
+        "usage_complete": false,
+        "error_code": null,
+        "input_tokens": null,
+        "output_tokens": null
+      }
+    },
+    {
+      "id": "anthropic-normalize-usage-partial",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-anthropic-v1",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "Synthetic answer."
+          }
+        ],
+        "stop_reason": "end_turn",
+        "usage": {
+          "input_tokens": 8
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "usage_complete": false,
+        "error_code": null,
+        "input_tokens": 8,
+        "output_tokens": null
+      }
+    },
+    {
+      "id": "anthropic-normalize-usage-null",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-anthropic-v1",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "Synthetic answer."
+          }
+        ],
+        "stop_reason": "end_turn",
+        "usage": {
+          "input_tokens": null,
+          "output_tokens": 4
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "usage_complete": false,
+        "error_code": null,
+        "input_tokens": null,
+        "output_tokens": 4
+      }
+    },
+    {
+      "id": "anthropic-normalize-usage-bool",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-anthropic-v1",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "Synthetic answer."
+          }
+        ],
+        "stop_reason": "end_turn",
+        "usage": {
+          "input_tokens": true,
+          "output_tokens": 4
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "usage_complete": false,
+        "error_code": null,
+        "input_tokens": null,
+        "output_tokens": 4
+      }
+    },
+    {
+      "id": "anthropic-normalize-usage-string",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-anthropic-v1",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "Synthetic answer."
+          }
+        ],
+        "stop_reason": "end_turn",
+        "usage": {
+          "input_tokens": "8",
+          "output_tokens": 4
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "usage_complete": false,
+        "error_code": null,
+        "input_tokens": null,
+        "output_tokens": 4
+      }
+    },
+    {
+      "id": "anthropic-normalize-usage-negative",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-anthropic-v1",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "Synthetic answer."
+          }
+        ],
+        "stop_reason": "end_turn",
+        "usage": {
+          "input_tokens": -1,
+          "output_tokens": 4
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "usage_complete": false,
+        "error_code": null,
+        "input_tokens": null,
+        "output_tokens": 4
+      }
+    },
+    {
+      "id": "anthropic-normalize-usage-fraction",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-anthropic-v1",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "Synthetic answer."
+          }
+        ],
+        "stop_reason": "end_turn",
+        "usage": {
+          "input_tokens": 1.5,
+          "output_tokens": 4
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "usage_complete": false,
+        "error_code": null,
+        "input_tokens": null,
+        "output_tokens": 4
+      }
+    },
+    {
+      "id": "anthropic-normalize-usage-unknown-component",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-anthropic-v1",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "Synthetic answer."
+          }
+        ],
+        "stop_reason": "end_turn",
+        "usage": {
+          "input_tokens": 8,
+          "output_tokens": 4,
+          "synthetic_other_charge": 2
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "usage_complete": false,
+        "error_code": null,
+        "input_tokens": 8,
+        "output_tokens": 4
+      }
+    },
+    {
+      "id": "anthropic-normalize-wrong-model",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-wrong-model",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "Synthetic answer."
+          }
+        ],
+        "stop_reason": "end_turn",
+        "usage": {
+          "input_tokens": 8,
+          "output_tokens": 4
+        }
+      },
+      "expected": {
+        "status": "provider_error",
+        "usage_complete": true,
+        "error_code": "invalid_profile"
+      }
+    },
+    {
+      "id": "anthropic-normalize-unsupported-finish",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-anthropic-v1",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "Synthetic answer."
+          }
+        ],
+        "stop_reason": "tool_use",
+        "usage": {
+          "input_tokens": 8,
+          "output_tokens": 4
+        }
+      },
+      "expected": {
+        "status": "provider_error",
+        "usage_complete": true,
+        "error_code": "unknown_finish_reason"
+      }
+    },
+    {
+      "id": "anthropic-normalize-malformed-finish",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-anthropic-v1",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "Synthetic answer."
+          }
+        ],
+        "stop_reason": [],
+        "usage": {
+          "input_tokens": 8,
+          "output_tokens": 4
+        }
+      },
+      "expected": {
+        "status": "provider_error",
+        "usage_complete": true,
+        "error_code": "unknown_finish_reason"
+      }
+    },
+    {
+      "id": "anthropic-normalize-unsupported-content",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-anthropic-v1",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_use",
+            "name": "synthetic"
+          }
+        ],
+        "stop_reason": "end_turn",
+        "usage": {
+          "input_tokens": 8,
+          "output_tokens": 4
+        }
+      },
+      "expected": {
+        "status": "provider_error",
+        "usage_complete": true,
+        "error_code": "unsupported_response"
+      }
+    },
+    {
+      "id": "anthropic-normalize-unsafe-request-id",
+      "kind": "normalize",
+      "response": {
+        "id": "Synthetic unsafe id\nSECRET-LIKE-PLACEHOLDER",
+        "model": "mock-anthropic-v1",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "Synthetic answer."
+          }
+        ],
+        "stop_reason": "end_turn",
+        "usage": {
+          "input_tokens": 8,
+          "output_tokens": 4
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "usage_complete": true,
+        "error_code": null,
+        "provider_request_id": null
+      }
+    },
+    {
+      "id": "anthropic-normalize-non-object",
+      "kind": "normalize",
+      "response": [],
+      "expected": {
+        "status": "provider_error",
+        "usage_complete": false,
+        "error_code": "malformed_response"
+      }
+    },
+    {
+      "id": "anthropic-normalize-malformed-structure",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-anthropic-v1",
+        "type": "message",
+        "role": "assistant",
+        "content": null,
+        "stop_reason": "end_turn",
+        "usage": {
+          "input_tokens": 8,
+          "output_tokens": 4
+        }
+      },
+      "expected": {
+        "status": "provider_error",
+        "usage_complete": true,
+        "error_code": "malformed_response"
+      }
+    }
+  ]
+}

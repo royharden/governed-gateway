@@ -1,0 +1,868 @@
+{
+  "schema_version": 1,
+  "mode": "simulation",
+  "live_evidence": false,
+  "provider": "openai",
+  "profile_model": "mock-openai-v1",
+  "notes": [
+    "Synthetic shapes only; no assertion of current real API/model/billing behavior.",
+    "Vectors are inert development data. Runtime/shared-schema consumer checks are deferred.",
+    "Expected monetary completeness is usage_complete; no fixture proves actual billed cost.",
+    "Model identity aligned to ACCOUNT synthetic_configuration profiles under SOURCE-READ-007; no separately authored runtime profile."
+  ],
+  "vectors": [
+    {
+      "id": "openai-serialize-one-user",
+      "kind": "serialize",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Synthetic question."
+        }
+      ],
+      "max_completion_tokens": 16,
+      "expected_payload": {
+        "model": "mock-openai-v1",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Synthetic question."
+          }
+        ],
+        "stream": false,
+        "max_completion_tokens": 16,
+        "n": 1
+      }
+    },
+    {
+      "id": "openai-serialize-system",
+      "kind": "serialize",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Synthetic rules."
+        },
+        {
+          "role": "user",
+          "content": "Synthetic question."
+        }
+      ],
+      "max_completion_tokens": 16,
+      "expected_payload": {
+        "model": "mock-openai-v1",
+        "messages": [
+          {
+            "role": "system",
+            "content": "Synthetic rules."
+          },
+          {
+            "role": "user",
+            "content": "Synthetic question."
+          }
+        ],
+        "stream": false,
+        "max_completion_tokens": 16,
+        "n": 1
+      }
+    },
+    {
+      "id": "openai-serialize-alternating",
+      "kind": "serialize",
+      "messages": [
+        {
+          "role": "user",
+          "content": "A"
+        },
+        {
+          "role": "assistant",
+          "content": "B"
+        },
+        {
+          "role": "user",
+          "content": "C"
+        }
+      ],
+      "max_completion_tokens": 16,
+      "expected_payload": {
+        "model": "mock-openai-v1",
+        "messages": [
+          {
+            "role": "user",
+            "content": "A"
+          },
+          {
+            "role": "assistant",
+            "content": "B"
+          },
+          {
+            "role": "user",
+            "content": "C"
+          }
+        ],
+        "stream": false,
+        "max_completion_tokens": 16,
+        "n": 1
+      }
+    },
+    {
+      "id": "openai-serialize-unicode-cjk",
+      "kind": "serialize",
+      "messages": [
+        {
+          "role": "user",
+          "content": "你好。日本語。"
+        }
+      ],
+      "max_completion_tokens": 16,
+      "expected_payload": {
+        "model": "mock-openai-v1",
+        "messages": [
+          {
+            "role": "user",
+            "content": "你好。日本語。"
+          }
+        ],
+        "stream": false,
+        "max_completion_tokens": 16,
+        "n": 1
+      }
+    },
+    {
+      "id": "openai-serialize-emoji",
+      "kind": "serialize",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Synthetic 🧪🚦"
+        }
+      ],
+      "max_completion_tokens": 16,
+      "expected_payload": {
+        "model": "mock-openai-v1",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Synthetic 🧪🚦"
+          }
+        ],
+        "stream": false,
+        "max_completion_tokens": 16,
+        "n": 1
+      }
+    },
+    {
+      "id": "openai-serialize-punctuation",
+      "kind": "serialize",
+      "messages": [
+        {
+          "role": "user",
+          "content": "{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/"
+        }
+      ],
+      "max_completion_tokens": 16,
+      "expected_payload": {
+        "model": "mock-openai-v1",
+        "messages": [
+          {
+            "role": "user",
+            "content": "{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/{}[]():;!?\\\"\n\t+-=/"
+          }
+        ],
+        "stream": false,
+        "max_completion_tokens": 16,
+        "n": 1
+      }
+    },
+    {
+      "id": "openai-serialize-exact-whitespace",
+      "kind": "serialize",
+      "messages": [
+        {
+          "role": "user",
+          "content": "  A\r\nB\t  "
+        }
+      ],
+      "max_completion_tokens": 16,
+      "expected_payload": {
+        "model": "mock-openai-v1",
+        "messages": [
+          {
+            "role": "user",
+            "content": "  A\r\nB\t  "
+          }
+        ],
+        "stream": false,
+        "max_completion_tokens": 16,
+        "n": 1
+      }
+    },
+    {
+      "id": "openai-serialize-minimum-cap",
+      "kind": "serialize",
+      "messages": [
+        {
+          "role": "user",
+          "content": "A"
+        }
+      ],
+      "max_completion_tokens": 1,
+      "expected_payload": {
+        "model": "mock-openai-v1",
+        "messages": [
+          {
+            "role": "user",
+            "content": "A"
+          }
+        ],
+        "stream": false,
+        "max_completion_tokens": 1,
+        "n": 1
+      }
+    },
+    {
+      "id": "openai-serialize-maximum-cap",
+      "kind": "serialize",
+      "messages": [
+        {
+          "role": "user",
+          "content": "A"
+        }
+      ],
+      "max_completion_tokens": 1024,
+      "expected_payload": {
+        "model": "mock-openai-v1",
+        "messages": [
+          {
+            "role": "user",
+            "content": "A"
+          }
+        ],
+        "stream": false,
+        "max_completion_tokens": 1024,
+        "n": 1
+      }
+    },
+    {
+      "id": "openai-normalize-success",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-openai-v1",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "Synthetic answer.",
+              "refusal": null
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 8,
+          "completion_tokens": 4,
+          "total_tokens": 12
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "usage_complete": true,
+        "error_code": null,
+        "expected_text": "Synthetic answer.",
+        "input_tokens": 8,
+        "output_tokens": 4
+      }
+    },
+    {
+      "id": "openai-normalize-cjk",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-openai-v1",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "你好。",
+              "refusal": null
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 8,
+          "completion_tokens": 4,
+          "total_tokens": 12
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "usage_complete": true,
+        "error_code": null,
+        "expected_text": "你好。"
+      }
+    },
+    {
+      "id": "openai-normalize-emoji",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-openai-v1",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "Synthetic 🧪",
+              "refusal": null
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 8,
+          "completion_tokens": 4,
+          "total_tokens": 12
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "usage_complete": true,
+        "error_code": null,
+        "expected_text": "Synthetic 🧪"
+      }
+    },
+    {
+      "id": "openai-normalize-punctuation",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-openai-v1",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{}[]!?",
+              "refusal": null
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 8,
+          "completion_tokens": 4,
+          "total_tokens": 12
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "usage_complete": true,
+        "error_code": null,
+        "expected_text": "{}[]!?"
+      }
+    },
+    {
+      "id": "openai-normalize-empty-output",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-openai-v1",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "",
+              "refusal": null
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 8,
+          "completion_tokens": 4,
+          "total_tokens": 12
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "usage_complete": true,
+        "error_code": null,
+        "expected_text": ""
+      }
+    },
+    {
+      "id": "openai-normalize-truncation",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-openai-v1",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "Synthetic answer.",
+              "refusal": null
+            },
+            "finish_reason": "length"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 8,
+          "completion_tokens": 4,
+          "total_tokens": 12
+        }
+      },
+      "expected": {
+        "status": "truncated",
+        "usage_complete": true,
+        "error_code": null
+      }
+    },
+    {
+      "id": "openai-normalize-refusal",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-openai-v1",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": null,
+              "refusal": "Synthetic refusal."
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 8,
+          "completion_tokens": 4,
+          "total_tokens": 12
+        }
+      },
+      "expected": {
+        "status": "refused",
+        "usage_complete": true,
+        "error_code": null
+      }
+    },
+    {
+      "id": "openai-normalize-usage-absent",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-openai-v1",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "Synthetic answer.",
+              "refusal": null
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expected": {
+        "status": "ok",
+        "usage_complete": false,
+        "error_code": null,
+        "input_tokens": null,
+        "output_tokens": null
+      }
+    },
+    {
+      "id": "openai-normalize-usage-partial",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-openai-v1",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "Synthetic answer.",
+              "refusal": null
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 8
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "usage_complete": false,
+        "error_code": null,
+        "input_tokens": 8,
+        "output_tokens": null
+      }
+    },
+    {
+      "id": "openai-normalize-usage-null",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-openai-v1",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "Synthetic answer.",
+              "refusal": null
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": null,
+          "completion_tokens": 4
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "usage_complete": false,
+        "error_code": null,
+        "input_tokens": null,
+        "output_tokens": 4
+      }
+    },
+    {
+      "id": "openai-normalize-usage-bool",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-openai-v1",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "Synthetic answer.",
+              "refusal": null
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": true,
+          "completion_tokens": 4
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "usage_complete": false,
+        "error_code": null,
+        "input_tokens": null,
+        "output_tokens": 4
+      }
+    },
+    {
+      "id": "openai-normalize-usage-string",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-openai-v1",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "Synthetic answer.",
+              "refusal": null
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": "8",
+          "completion_tokens": 4
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "usage_complete": false,
+        "error_code": null,
+        "input_tokens": null,
+        "output_tokens": 4
+      }
+    },
+    {
+      "id": "openai-normalize-usage-negative",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-openai-v1",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "Synthetic answer.",
+              "refusal": null
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": -1,
+          "completion_tokens": 4
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "usage_complete": false,
+        "error_code": null,
+        "input_tokens": null,
+        "output_tokens": 4
+      }
+    },
+    {
+      "id": "openai-normalize-usage-fraction",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-openai-v1",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "Synthetic answer.",
+              "refusal": null
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 1.5,
+          "completion_tokens": 4
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "usage_complete": false,
+        "error_code": null,
+        "input_tokens": null,
+        "output_tokens": 4
+      }
+    },
+    {
+      "id": "openai-normalize-usage-unknown-component",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-openai-v1",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "Synthetic answer.",
+              "refusal": null
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 8,
+          "completion_tokens": 4,
+          "synthetic_other_charge": 2
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "usage_complete": false,
+        "error_code": null,
+        "input_tokens": 8,
+        "output_tokens": 4
+      }
+    },
+    {
+      "id": "openai-normalize-wrong-model",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-wrong-model",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "Synthetic answer.",
+              "refusal": null
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 8,
+          "completion_tokens": 4,
+          "total_tokens": 12
+        }
+      },
+      "expected": {
+        "status": "provider_error",
+        "usage_complete": true,
+        "error_code": "invalid_profile"
+      }
+    },
+    {
+      "id": "openai-normalize-unsupported-finish",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-openai-v1",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "Synthetic answer.",
+              "refusal": null
+            },
+            "finish_reason": "tool_calls"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 8,
+          "completion_tokens": 4,
+          "total_tokens": 12
+        }
+      },
+      "expected": {
+        "status": "provider_error",
+        "usage_complete": true,
+        "error_code": "unknown_finish_reason"
+      }
+    },
+    {
+      "id": "openai-normalize-malformed-finish",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-openai-v1",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "Synthetic answer.",
+              "refusal": null
+            },
+            "finish_reason": []
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 8,
+          "completion_tokens": 4,
+          "total_tokens": 12
+        }
+      },
+      "expected": {
+        "status": "provider_error",
+        "usage_complete": true,
+        "error_code": "unknown_finish_reason"
+      }
+    },
+    {
+      "id": "openai-normalize-unsupported-content",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-openai-v1",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "Synthetic answer.",
+              "refusal": null,
+              "tool_calls": []
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 8,
+          "completion_tokens": 4,
+          "total_tokens": 12
+        }
+      },
+      "expected": {
+        "status": "provider_error",
+        "usage_complete": true,
+        "error_code": "unsupported_response"
+      }
+    },
+    {
+      "id": "openai-normalize-unsafe-request-id",
+      "kind": "normalize",
+      "response": {
+        "id": "Synthetic unsafe id\nSECRET-LIKE-PLACEHOLDER",
+        "model": "mock-openai-v1",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "Synthetic answer.",
+              "refusal": null
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 8,
+          "completion_tokens": 4,
+          "total_tokens": 12
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "usage_complete": true,
+        "error_code": null,
+        "provider_request_id": null
+      }
+    },
+    {
+      "id": "openai-normalize-non-object",
+      "kind": "normalize",
+      "response": [],
+      "expected": {
+        "status": "provider_error",
+        "usage_complete": false,
+        "error_code": "malformed_response"
+      }
+    },
+    {
+      "id": "openai-normalize-malformed-structure",
+      "kind": "normalize",
+      "response": {
+        "id": "mock-safe-id",
+        "model": "mock-openai-v1",
+        "choices": [],
+        "usage": {
+          "prompt_tokens": 8,
+          "completion_tokens": 4,
+          "total_tokens": 12
+        }
+      },
+      "expected": {
+        "status": "provider_error",
+        "usage_complete": true,
+        "error_code": "malformed_response"
+      }
+    }
+  ]
+}
