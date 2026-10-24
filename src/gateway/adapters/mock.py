@@ -1,6 +1,6 @@
 """Deterministic in-memory synthetic outcomes; never claims live API behavior."""
 
-from gateway.schemas import ProviderEnvelope, ProviderResult
+from gateway.schemas import ProviderEnvelope, ProviderResult, ProviderUsage
 
 from .common import error_result
 from .normalization import normalize_anthropic, normalize_openai
@@ -8,9 +8,18 @@ from .normalization import normalize_anthropic, normalize_openai
 
 def generate_mock(envelope: ProviderEnvelope, scenario: str) -> ProviderResult:
     """One synthetic attempt. Call only after the controller's funded claim gate."""
-    if scenario in {"pre_send_failure", "cancelled", "timeout", "disconnect", "rate_limit", "unavailable"}:
+    if scenario == "pre_send_failure":
+        # This allowlisted synthetic branch deterministically performs no send.
+        # Explicit fixture knowledge is not a default for absent provider usage
+        # and is not live no-charge evidence or permission to retry/refund.
+        return error_result(
+            envelope, "pre_send_failure", status="provider_error",
+            dispatch_state="not_sent", retry_evidence="pre_send_certain",
+            usage=ProviderUsage(input_tokens=0, output_tokens=0, complete=True,
+                                unknown_components=()),
+        )
+    if scenario in {"cancelled", "timeout", "disconnect", "rate_limit", "unavailable"}:
         outcomes = {
-            "pre_send_failure": ("pre_send_failure", "provider_error", "not_sent", "pre_send_certain"),
             "cancelled": ("cancelled", "cancelled", "not_sent", "none"),
             "timeout": ("timeout", "timeout", "ambiguous", "none"),
             "disconnect": ("disconnected", "provider_error", "ambiguous", "none"),

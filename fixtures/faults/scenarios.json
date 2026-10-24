@@ -5,7 +5,8 @@
   "notes": [
     "Faults never themselves retry or mutate any authority.",
     "Synthetic no-charge evidence is NOT live eligibility or release/refund authorization.",
-    "Deadline/cancellation before mock handoff is not_sent; timeout/disconnect after synthetic handoff remains ambiguous."
+    "Deadline/cancellation before mock handoff is not_sent; timeout/disconnect after synthetic handoff remains ambiguous.",
+    "Only pre_send_failure has explicit complete zero usage from synthetic pre-send certainty; other error faults and unproved no-charge hints keep unknown usage. Adapter never releases money or dispatches a retry."
   ],
   "scenarios": [
     {
@@ -86,7 +87,19 @@
       "dispatch_state": "not_sent",
       "retry_evidence": "pre_send_certain",
       "synthetic_only": true,
-      "permitted_additional_sends": 0
+      "permitted_additional_sends": 0,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "complete": true,
+        "unknown_components": []
+      },
+      "zero_usage_basis": "Deterministic synthetic not_sent plus pre_send_certain only; not missing provider usage.",
+      "downstream_retry_requires": [
+        "Exact pinned synthetic price and complete zero usage",
+        "Actual committed known-zero settlement and trusted guarded retry source",
+        "Original declared prefunded distinct second child and persisted gate proof"
+      ]
     },
     {
       "scenario": "timeout",
