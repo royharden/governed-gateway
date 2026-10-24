@@ -30,6 +30,7 @@ class GatewayController:
                  replay_cipher: ReplayCipher, clock: Callable[[], datetime],
                  evaluation_loader: Callable[[str], tuple[PolicyBundle, EvaluationAuthorization]]):
         self.policies, self.ledger, self.planner = policies, ledger, planner
+        self._authority_id = ledger.authority.authority_id
         self.guard, self.authenticator = authority_lock, authenticator
         self.replay = ReplayService(replay_cipher)
         self.clock = clock
@@ -44,6 +45,7 @@ class GatewayController:
         A restart has no observation and returns None; it cannot reconstruct proof
         or dispatch. PolicyStore persists its validated readiness event separately.
         """
+        self.guard.assert_held(authority_id=self._authority_id)
         observed = self._outcomes.get((operation_id, child_id))
         if observed is None:
             return None

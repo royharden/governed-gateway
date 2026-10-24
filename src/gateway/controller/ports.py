@@ -11,7 +11,7 @@ from decimal import Decimal
 from typing import Protocol
 
 from gateway.schemas import (
-    AccountingTotals, AttemptReceipt, CapabilityProfile, ChildClosureReceipt,
+    AccountingTotals, AttemptReceipt, BudgetAuthority, CapabilityProfile, ChildClosureReceipt,
     CallerContext, DispatchTicket, EligibilityContext, EncryptedResult, FundingReceipt,
     GatewayRequest, IncidentEvidence, IncidentRecord, LedgerJoin, LedgerOperationSnapshot,
     LedgerRecoveryPage, OperationPermit, OperationSnapshot, PermitDecision, PermitPlan, PolicyRecoveryPage,
@@ -60,6 +60,7 @@ class QuotePort(Protocol):
 
 
 class LedgerPort(Protocol):
+    authority: BudgetAuthority
     # settle MUST retain credible conflicting evidence via the approved ACCOUNT
     # gate using actual committed K/U before returning/raising settlement_conflict.
     # JOURNEY stages receipt first and additionally halts; it cannot infer U.
