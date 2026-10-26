@@ -80,7 +80,6 @@ def _latency_ms(nanoseconds: int) -> Decimal:
 
 
 def _database_path(root: Path, filename: str, *, existing: bool) -> Path:
-    # A canonical parent plus one ordinary child cannot escape containment.
     # Reject Windows aliases on every platform so a portable spec cannot gain
     # drive/ADS/device semantics merely by moving hosts.
     _require(type(filename) is str and bool(filename)
@@ -91,14 +90,14 @@ def _database_path(root: Path, filename: str, *, existing: bool) -> Path:
              ErrorCode.UNSAFE_RUNTIME_PATH)
     root = require_local_runtime_root(root)
     path = root / filename
-    try:
+    if path.exists():
         info = path.lstat()
-    except FileNotFoundError:
-        _require(not existing, ErrorCode.STORE_UNAVAILABLE)
-    else:
-        _require(stat.S_ISREG(info.st_mode) and not stat.S_ISLNK(info.st_mode)
+        _require(stat.S_ISREG(info.st_mode) and not path.is_symlink()
                  and not (getattr(info, "st_file_attributes", 0) & 0x400),
                  ErrorCode.UNSAFE_RUNTIME_PATH)
+    else:
+        _require(not existing, ErrorCode.STORE_UNAVAILABLE)
+    _require(path.resolve(strict=existing).parent == root, ErrorCode.UNSAFE_RUNTIME_PATH)
     return path
 
 
