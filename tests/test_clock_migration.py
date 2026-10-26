@@ -281,3 +281,27 @@ def test_original_v1_implementation_refuses_schema2(artifact_dir):
         module.Ledger(path, authority=config.authority, price_snapshot=config.price_snapshot,
             trusted_bounds=config.trusted_bounds, clock=lambda: clock.wall, monotonic=lambda: 0.0)
     assert financial_snapshot(path) == before
+
+
+@pytest.mark.parametrize("field", ["last_seen", "last_wall"])
+def test_incompatible_integer_clock_fails_with_closed_error(artifact_dir, field):
+    """CLOCK-R1: malformed persisted types must not leak AttributeError."""
+    config = configuration()
+    clock = Clocks(config)
+    path = artifact_dir / ("m8-integer-" + field + ".sqlite3")
+    definitions = {name: "INTEGER" if name == field else "TEXT" for name in ("last_seen", "last_wall")}
+    with sqlite3.connect(path) as db:
+        db.execute("CREATE TABLE authorities(id TEXT PRIMARY KEY,definition TEXT NOT NULL,halted INTEGER NOT NULL," +
+                   "last_seen " + definitions["last_seen"] + " NOT NULL,last_wall " + definitions["last_wall"] + " NOT NULL)")
+        values = {name: 1 if name == field else clock.wall.isoformat() for name in definitions}
+        db.execute("INSERT INTO authorities VALUES(?,?,0,?,?)", (config.authority.authority_id,
+            json.dumps(config.authority.model_dump(mode="json"), sort_keys=True, separators=(",", ":")), values["last_seen"], values["last_wall"]))
+        db.execute("PRAGMA user_version=2")
+    def snapshot():
+        with sqlite3.connect(path) as db:
+            return (db.execute("SELECT name,sql FROM sqlite_master ORDER BY name").fetchall(),
+                    db.execute("SELECT * FROM authorities").fetchall(), db.execute("PRAGMA user_version").fetchone()[0])
+    before = snapshot()
+    with pytest.raises(LedgerError, match="clock_state|schema_version"):
+        ledger = open_ledger(path, config, clock=lambda: clock.wall)
+    assert snapshot() == before
