@@ -1,5 +1,6 @@
 """D6 high-water performance safety controls, independent public SQLite fixtures."""
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import os
 import sqlite3
@@ -281,3 +282,74 @@ def test_normal_context_close_closes_ledger_and_clock(loaded_simulation):
         context.clock.evidence_sha256()
     assert context.clock._high_water._connection is None
     assert context.clock._high_water._closed
+
+
+def test_swallowed_recursive_clock_error_permanently_invalidates_trust(highwater):
+    store, initial, _ = highwater
+    attempted = []
+    clock = None
+    def callback():
+        if not attempted:
+            attempted.append(True)
+            try:
+                clock()
+            except GatewayError:
+                pass  # An untrusted callback must not be able to clear failure.
+        return initial
+    clock = _AuthorityClock(guard=store.guard, authority_id="m8-highwater", high_water=store,
+        utc_now=callback, monotonic_ns=lambda: 0, clock_identity_sha256="b"*64,
+        max_drift=timedelta(seconds=1), max_startup_advance=timedelta(hours=1))
+    with pytest.raises(GatewayError):
+        clock()
+    assert attempted
+    with pytest.raises(GatewayError):
+        clock()
+    with pytest.raises(GatewayError):
+        clock.evidence_sha256()
+
+
+def test_outer_guard_entry_failure_permanently_invalidates_clock(highwater, monkeypatch):
+    store, initial, _ = highwater
+    clock, _ = clock_for(store, initial)
+    clock()
+    class RefusedContext:
+        def __enter__(self):
+            raise GatewayError(ErrorCode.LOCK_UNAVAILABLE)
+        def __exit__(self, *args):
+            return False
+    class RefusedGuard:
+        def hold(self, *args, **kwargs):
+            return RefusedContext()
+    with monkeypatch.context() as patch:
+        patch.setattr(clock, "_guard", RefusedGuard())
+        with pytest.raises(GatewayError) as first:
+            clock()
+        assert first.value.code == ErrorCode.LOCK_UNAVAILABLE
+    with pytest.raises(GatewayError):
+        clock()
+    with pytest.raises(GatewayError):
+        clock.evidence_sha256()
+
+
+@pytest.mark.parametrize("operation", ["read", "cas"])
+def test_direct_foreign_pid_refused_before_any_guard_entry(highwater, monkeypatch, operation):
+    store, initial, _ = highwater
+    store.read()
+    original_guard = store.guard
+    entries = []
+    class ObservedGuard:
+        @contextmanager
+        def hold(self, *args, **kwargs):
+            entries.append(True)
+            with original_guard.hold(*args, **kwargs):
+                yield
+    real_pid = os.getpid()
+    with monkeypatch.context() as patch:
+        patch.setattr(store, "guard", ObservedGuard())
+        patch.setattr(os, "getpid", lambda: real_pid+1)
+        with pytest.raises(GatewayError):
+            if operation == "read":
+                store.read()
+            else:
+                store.compare_and_advance(initial, initial+timedelta(microseconds=1))
+    assert entries == [], "Foreign PID entered inherited guard before being refused"
