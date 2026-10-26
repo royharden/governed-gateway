@@ -145,16 +145,44 @@ def test_frozen_report_and_diagnostics_tamper_refuses(evaluation_case):
         validate_artifacts(report, replace(artifacts, diagnostics_canonical=canonical_bytes(data)))
 
 
+def assert_payload_free(value, canary):
+    if isinstance(value, dict):
+        assert not {"response_text", "input_text", "expected_answers", "messages"}.intersection(value)
+        for child in value.values():
+            assert_payload_free(child, canary)
+    elif isinstance(value, list):
+        for child in value:
+            assert_payload_free(child, canary)
+    elif isinstance(value, str):
+        assert canary not in value
+
+
 def test_report_bundle_deterministic_and_payload_free(evaluation_case):
-    report, artifacts = run(evaluation_case)
-    again, other = run(evaluation_case)
+    # Exact body keys and opaque body canaries are forbidden; a response digest
+    # is required provenance and is not a plaintext response. The old substring
+    # assertion falsely rejected response_text_sha256; retain this distinction.
+    canary = "M8_PRIVATE_RESPONSE_CANARY_22f403e74ef64d5c"
+    receipts = list(evaluation_case["receipts"])
+    receipts[0] = receipts[0].model_copy(update={"response_text": canary})
+    report, artifacts = run(evaluation_case, receipts)
+    again, other = run(evaluation_case, receipts)
     assert canonical_bytes(report) == canonical_bytes(again)
     assert artifacts == other
     output = evaluation_json(report, artifacts=artifacts)
-    assert "response_text" not in output and "input_text" not in output
+    assert_payload_free(json.loads(output), canary)
+    assert "response_text_sha256" in output
     markdown = StringIO()
     render_evaluation(report, output=markdown, artifacts=artifacts)
     assert "SIMULATION" in markdown.getvalue() and "unavailable" in markdown.getvalue()
+    assert canary not in markdown.getvalue()
+
+
+@pytest.mark.parametrize("leak", [{"response_text": "private-canary"},
+    {"nested": [{"unrelated_field": "prefix-private-canary-suffix"}]},
+    {"nested": {"input_text": "something else"}}])
+def test_privacy_check_detects_injected_key_and_value_leaks(leak):
+    with pytest.raises(AssertionError):
+        assert_payload_free(leak, "private-canary")
 
 
 def test_integer_known_wilson_endpoints_and_negative_paired_result(evaluation_case):

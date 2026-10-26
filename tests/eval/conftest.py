@@ -1,19 +1,18 @@
 """Independent, synthetic development-only fixtures; never opens a secret file."""
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-import json
 import os
+from types import SimpleNamespace
 import uuid
 
 import pytest
 
-from gateway.bootstrap import _load_demo_configuration
 from gateway.cli.signing import confirmation_digest
 from gateway.cli.simulation import create_simulation_signer
 from gateway.evaluation.dataset import load_development
 from gateway.evaluation.scoring import EvalRunner
-from gateway.schemas import EvaluationAuthorizationPayload, digest
-from gateway.schemas.operator import AcquisitionReceipt
+from gateway.schemas import EvaluationAuthorizationPayload, EvidenceTuple, PolicyBundle, PolicyTarget, digest
+from gateway.schemas.operator import AcquisitionReceipt, EvaluationSpec
 from gateway.shadow.evaluator import recommend_target
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -21,26 +20,47 @@ ROOT = Path(__file__).resolve().parents[2]
 
 @pytest.fixture(scope="session")
 def evaluation_case():
-    # Fresh authority, chosen before execution; preserve every store/config after
-    # the run. Never extend/reopen the expired example or change its cap/quota.
+    # Pure scoring fixtures have no DB, adapter, bootstrap or network capability.
+    # Dependencies below are explicit synthetic unit-test identities, never
+    # evidence of executing production authorities. Docker covers real bootstrap.
     parent = Path(os.environ.get("M8_TEST_RUNTIME_PARENT", "C:/agent-runtime/m8-r03-rv2"))
     runtime = parent / ("eval-" + uuid.uuid4().hex)
     runtime.mkdir(parents=True, exist_ok=False)
     now = datetime.now(timezone.utc)
-    raw = json.loads((ROOT / "fixtures/bootstrap/simulation.example.json").read_text())
-    raw.update(runtime_root=str(runtime), authority_id="rv2-" + uuid.uuid4().hex,
-               created_utc=(now - timedelta(minutes=1)).isoformat(),
-               deadline_utc=(now + timedelta(hours=1)).isoformat())
-    config = runtime / "simulation.json"
-    config.write_text(json.dumps(raw), encoding="utf-8")
-    runtime_spec, plans, *_ = _load_demo_configuration(config)
     manifest, tasks = load_development(ROOT / "fixtures/tasks/dev")
-    record = runtime_spec.records[1]  # candidate selects B1
-    spec = runtime_spec.evaluation_specs[0]
+    identity = lambda name: digest({"kind": "rv2-public-unit-fixture", "name": name})
+    expiry = now + timedelta(hours=1)
+    targets = tuple(PolicyTarget(target_id=target, provider=provider, exact_model=model,
+        api_version="synthetic-v1", capability_sha256=identity(target + "-profile"),
+        adapter_sha256=identity(target + "-adapter"))
+        for target, provider, model in (("B0", "openai", "mock-openai-v1"),
+                                       ("B1", "anthropic", "mock-anthropic-v1")))
+    spec = EvaluationSpec(spec_id="rv2-public-unit", version=1,
+        evaluator_code_sha256=identity("code"), corpus_sha256=digest(manifest),
+        metric_sha256=identity("metric"), adapter_capability_sha256=identity("profiles"),
+        adapter_sha256=identity("adapters"), price_sha256=identity("price"),
+        bound_sha256=identity("bound"), feature_schema_sha256=identity("features"),
+        mode="simulation", matching_rules_sha256=manifest.matching_rules_sha256,
+        freshness_seconds=86400, bootstrap_seed=1729, confidence_level="0.95",
+        noninferiority_tolerance="0.05", benefit_metric_id="synthetic-unmeasured-benefit",
+        template_split_sha256=manifest.template_split_sha256,
+        created_utc=now - timedelta(minutes=1), expires_utc=expiry)
+    bundle = PolicyBundle(policy_id="rv2-public-unit-candidate", version=1,
+        route_aliases=("default",), targets=targets, rules=(), fallback_target_id="B1",
+        max_attempts_total=1, operation_timeout_seconds=60, attempt_timeout_seconds=30,
+        max_backoff_milliseconds=0, price_sha256=spec.price_sha256,
+        bound_bundle_sha256=spec.bound_sha256, eval_spec_sha256=digest(spec),
+        feature_schema_sha256=spec.feature_schema_sha256, expires_utc=expiry)
+    evidence = EvidenceTuple(policy_bundle_sha256=digest(bundle), eval_spec_sha256=digest(spec),
+        evaluator_code_sha256=spec.evaluator_code_sha256, corpus_sha256=digest(manifest),
+        metric_sha256=spec.metric_sha256, adapter_capability_sha256=spec.adapter_capability_sha256,
+        adapter_sha256=spec.adapter_sha256, price_sha256=spec.price_sha256,
+        bound_sha256=spec.bound_sha256, feature_schema_sha256=spec.feature_schema_sha256)
+    record = SimpleNamespace(bundle=bundle, evidence=evidence)
     signer = create_simulation_signer(allowed_evidence=(record.evidence,))
     payload = EvaluationAuthorizationPayload(
-        authorization_id="rv2-public-dev", authority_id=raw["authority_id"],
-        budget_authority_id=raw["authority_id"], budget_reference_sha256=digest(raw),
+        authorization_id="rv2-public-dev", authority_id="rv2-public-unit",
+        budget_authority_id="rv2-public-unit", budget_reference_sha256=identity("budget"),
         maximum_liability_usd="0.245760", mode="simulation", tuple=record.evidence,
         created_utc=now - timedelta(seconds=1), expires_utc=spec.expires_utc,
         nonce="rv2-public-dev-nonce", declared_os_account=signer.declared_os_account,
@@ -71,5 +91,5 @@ def evaluation_case():
         latency_ms="1", acquired_utc=now - timedelta(seconds=1))
         for task in tasks for target in ("B0", "B1"))
     return dict(runner=runner, spec=spec, manifest=manifest, tasks=tasks, receipts=receipts,
-                now=now, runtime=runtime, config=config, runtime_spec=runtime_spec, plans=plans,
+                now=now, runtime=runtime,
                 signer=signer, authorization=auth, record=record)

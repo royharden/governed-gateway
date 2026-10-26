@@ -1,5 +1,6 @@
 """Independent exact-tuple/signature and simulation-only governance consumers."""
 from datetime import timedelta
+from decimal import Decimal
 import hashlib
 
 from cryptography.hazmat.primitives import serialization
@@ -37,7 +38,7 @@ def test_real_ed25519_integrity_with_ephemeral_memory_keys(mutation):
 
 
 @pytest.mark.parametrize("field,value", [("authority_id", "spoofed-authority"),
-    ("maximum_liability_usd", "0.999999"), ("declared_os_account", "spoofed-actor"),
+    ("maximum_liability_usd", Decimal("0.999999")), ("declared_os_account", "spoofed-actor"),
     ("signer_fingerprint_sha256", "f" * 64), ("nonce", "changed-nonce")])
 def test_signed_evaluation_payload_mutation_denied(evaluation_case, field, value):
     case = evaluation_case
