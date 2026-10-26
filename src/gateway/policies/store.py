@@ -143,7 +143,10 @@ class PolicyStore:
         require(bool(root_value), "unsafe_runtime_path")
         root = require_local_runtime_root(Path(root_value))
         require(self._path.is_absolute(), "unsafe_runtime_path")
-        require_local_runtime_root(self._path.parent)
+        # Reuse only this invocation's freshly validated canonical directory.
+        # A nested or differently expressed parent still needs its own check.
+        if self._path.parent != root:
+            require_local_runtime_root(self._path.parent)
         require(not self._path.is_symlink()
                 and not (getattr(self._path.lstat(), "st_file_attributes", 0) & 0x400), "unsafe_runtime_path")
         path = self._path.resolve(strict=True)
