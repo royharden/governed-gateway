@@ -45,7 +45,9 @@ def store_case(monkeypatch):
         price_snapshot=spec.price_snapshot)
     signer = create_simulation_signer(allowed_evidence=tuple(r.evidence for r in spec.records))
     guard = AuthorityLock(root)
-    clock = lambda: datetime.now(timezone.utc)
+    def clock():
+        return datetime.now(timezone.utc)
+
     records = {digest(r.bundle): r for r in spec.records}
 
     def context(key):

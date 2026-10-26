@@ -28,7 +28,9 @@ def evaluation_case():
     runtime.mkdir(parents=True, exist_ok=False)
     now = datetime.now(timezone.utc)
     manifest, tasks = load_development(ROOT / "fixtures/tasks/dev")
-    identity = lambda name: digest({"kind": "rv2-public-unit-fixture", "name": name})
+    def identity(name):
+        return digest({"kind": "rv2-public-unit-fixture", "name": name})
+
     expiry = now + timedelta(hours=1)
     targets = tuple(PolicyTarget(target_id=target, provider=provider, exact_model=model,
         api_version="synthetic-v1", capability_sha256=identity(target + "-profile"),
