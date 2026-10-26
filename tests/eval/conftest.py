@@ -71,4 +71,5 @@ def evaluation_case():
         latency_ms="1", acquired_utc=now - timedelta(seconds=1))
         for task in tasks for target in ("B0", "B1"))
     return dict(runner=runner, spec=spec, manifest=manifest, tasks=tasks, receipts=receipts,
-                now=now, runtime=runtime, config=config, runtime_spec=runtime_spec, plans=plans)
+                now=now, runtime=runtime, config=config, runtime_spec=runtime_spec, plans=plans,
+                signer=signer, authorization=auth, record=record)
