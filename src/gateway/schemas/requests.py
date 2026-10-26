@@ -4,7 +4,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
 from .core import (ErrorCode, Hash, Identifier, Money, NonnegativeInt, Provider,
                    Record, SafeLabel, UTC, canonical_bytes, digest)
@@ -38,18 +38,23 @@ class ChatCompletionRequest(BaseModel):
     stream: Literal[False] = False
     n: Literal[1] = 1
 
-    @model_validator(mode="before")
+    @field_validator("stream", "n", mode="before")
     @classmethod
-    def exact_wire(cls, value):
-        if isinstance(value, dict):
-            if "schema_version" in value or ("stream" in value and value["stream"] is not False) or ("n" in value and (type(value["n"]) is not int or value["n"] != 1)):
+    def exact_wire_literals(cls, value, info: ValidationInfo):
+        if info.field_name == "stream":
+            if value is not False:
                 raise ValueError("unsupported_request")
-            if len(canonical_bytes(value)) > 65536:
-                raise ValueError("request_too_large")
+        elif type(value) is not int or value != 1:
+            raise ValueError("unsupported_request")
         return value
 
     @model_validator(mode="after")
     def check_wire(self):
+        # Preserve the original canonical input-size rule: do not count omitted
+        # default fields as bytes supplied by the caller. HTTP also checks raw
+        # body bytes before JSON decoding. Extra fields remain forbidden.
+        if len(canonical_bytes(self.model_dump(exclude_unset=True))) > 65536:
+            raise ValueError("request_too_large")
         _messages(self.messages)
         return self
 
