@@ -5,7 +5,6 @@ import argparse
 import asyncio
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 import sys
 from typing import TextIO
 
