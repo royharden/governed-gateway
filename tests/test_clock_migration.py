@@ -1,5 +1,5 @@
 """Independent M8-S3-CLOCK-1 controls. No production repair code is copied here."""
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import json
 import sqlite3
 
@@ -93,7 +93,8 @@ def legacy_database(path, config, *, halted=False):
     """
     context, plan, _ = inputs(config, children=4)
     stamp = (datetime.fromisoformat(config.authority.run_deadline_utc.replace("Z", "+00:00")) - timedelta(hours=2)).isoformat()
-    encode = lambda obj: json.dumps(obj, sort_keys=True, separators=(",", ":"))
+    def encode(obj):
+        return json.dumps(obj, sort_keys=True, separators=(",", ":"))
     with sqlite3.connect(path) as db:
         db.executescript("""
         CREATE TABLE authorities(id TEXT PRIMARY KEY,definition TEXT NOT NULL,halted INTEGER NOT NULL DEFAULT 0,last_seen TEXT NOT NULL);
@@ -175,7 +176,7 @@ def test_schema2_missing_clock_column_refused(artifact_dir):
     with sqlite3.connect(path) as db:
         db.execute("PRAGMA user_version=2")
     with pytest.raises(LedgerError):
-        ledger = open_ledger(path, config, clock=lambda: wall)
+        _ledger = open_ledger(path, config, clock=lambda: wall)
 
 
 def test_migration_failure_rolls_back_schema_and_data(artifact_dir):
@@ -303,5 +304,5 @@ def test_incompatible_integer_clock_fails_with_closed_error(artifact_dir, field)
                     db.execute("SELECT * FROM authorities").fetchall(), db.execute("PRAGMA user_version").fetchone()[0])
     before = snapshot()
     with pytest.raises(LedgerError, match="clock_state|schema_version"):
-        ledger = open_ledger(path, config, clock=lambda: clock.wall)
+        _ledger = open_ledger(path, config, clock=lambda: clock.wall)
     assert snapshot() == before
