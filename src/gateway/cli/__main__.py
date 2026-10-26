@@ -14,7 +14,7 @@ from gateway.schemas import (
     EvaluationAuthorizationPayload, EvaluationRecord, GatewayError, PolicyBundle,
     canonical_bytes,
 )
-from gateway.schemas.operator import EvaluationReport, QuoteRequest
+from gateway.schemas.operator import QuoteRequest
 from .operator import OperatorServices, activate, register_evaluation, rollback
 from .reports import render_operations, render_overview, render_policies
 from .signing import confirmation_digest, sign_approval, sign_evaluation_authorization

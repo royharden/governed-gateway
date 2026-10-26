@@ -7,13 +7,13 @@ from dataclasses import dataclass
 from pathlib import Path
 import sys
 
-_ROOT = Path(__file__).resolve().parents[3]
-
 from gateway.schemas import ErrorCode, EvaluationAuthorization, GatewayError, PolicyBundle, canonical_bytes
 from gateway.schemas.operator import AcquisitionReceipt, CorpusManifest, EvaluationSpec
 from gateway.evaluation.dataset import DevelopmentTask, load_development
 from gateway.evaluation.reporting import evaluation_json, render_evaluation
 from gateway.evaluation.scoring import EvalRunner
+
+_ROOT = Path(__file__).resolve().parents[3]
 
 
 @dataclass(frozen=True)

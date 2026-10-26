@@ -11,8 +11,8 @@ from pydantic import ValidationError
 from gateway.schemas import (
     AttemptReceipt, CallerContext, ChatCompletionInput, ErrorCode, EvaluationAuthorization, GatewayError,
     GatewayReply, GatewayRequest, GatewayResult, IncidentEvidence, OperationPermit,
-    PermitState, PolicyBundle, ProviderEnvelope, ProviderResult, ReplayBinding, ResultChoice,
-    ResultCost, SafeError, SettlementReceipt, UnknownReason, Usage, digest, request_digest,
+    PermitState, PolicyBundle, ProviderResult, ReplayBinding, ResultChoice,
+    ResultCost, SafeError, UnknownReason, Usage, digest, request_digest,
 )
 from gateway.api.auth import ClientAuthenticator
 from gateway.api.errors import error_reply
