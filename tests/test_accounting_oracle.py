@@ -6,7 +6,7 @@ import pytest
 
 from gateway.accounting.mapping import totals_projection
 from gateway.schemas import IncidentSnapshot
-from integer_oracle import State, expected, micros
+from integer_oracle import State as State, expected, micros
 
 
 @pytest.mark.parametrize("phase,charge,late,exposure", [

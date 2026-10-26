@@ -4,7 +4,6 @@ This covers S3 admission only. Crash boundaries and the controller matrix remain
 separate obligations. A seed chooses graph/cap; it does not replay OS scheduling.
 """
 from concurrent.futures import ProcessPoolExecutor
-from decimal import Decimal
 import json
 import multiprocessing
 import random
@@ -12,7 +11,7 @@ import random
 import pytest
 
 from integer_oracle import micros
-from ledger_support import configuration, inputs, open_ledger, race_admit, race_initialize
+from ledger_support import configuration, open_ledger, race_admit, race_initialize
 
 
 @pytest.mark.parametrize("processes,schedules", [(1, 34), (2, 33), (8, 33)])
