@@ -7,7 +7,7 @@ import sys
 
 
 def test_public_fixture_cli_journey(simulation_config):
-    root = Path(__file__).resolve().parents[1]
+    root = Path(os.environ.get("M8_SOURCE_ROOT", Path(__file__).resolve().parents[1])).resolve()
     environment = os.environ.copy()
     environment["PYTHONPATH"] = str(root / "src")
     environment["GATEWAY_RUNTIME_ROOT"] = str(simulation_config.parent)

@@ -10,7 +10,7 @@ import uuid
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(os.environ.get("M8_SOURCE_ROOT", Path(__file__).resolve().parents[1])).resolve()
 
 
 @pytest.fixture(autouse=True)

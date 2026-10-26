@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import json
+import os
 from pathlib import Path
 
 from gateway.accounting.synthetic import synthetic_configuration
@@ -11,7 +12,7 @@ from gateway.shared.s3.callledger.pricing import PriceSnapshot, RequestEvidence
 
 
 def configuration(authority_id="m8-test", cap="1"):
-    root = Path(__file__).resolve().parents[1]
+    root = Path(os.environ.get("M8_SOURCE_ROOT", Path(__file__).resolve().parents[1])).resolve()
     snapshot = PriceSnapshot.model_validate(json.loads((root / "fixtures/prices/mock-v1.json").read_text()))
     return synthetic_configuration(authority_id=authority_id, cap_usd=Decimal(cap),
         run_deadline_utc=datetime.now(timezone.utc) + timedelta(hours=2), max_outbound_attempts=2048,
