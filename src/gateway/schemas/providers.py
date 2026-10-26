@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from typing import Annotated, Literal
 from pydantic import Field, model_validator
-from .core import Hash, Identifier, NonnegativeInt, Provider, Record, SafeLabel, UTC, canonical_bytes, digest
+from .core import Hash, Identifier, NonnegativeInt, Provider as Provider, Record, SafeLabel, UTC, canonical_bytes, digest
 
 BillableComponent = Literal["input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "reasoning_tokens"]
 

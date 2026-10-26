@@ -7,7 +7,7 @@ from typing import Annotated, Literal, Tuple
 from pydantic import Field, model_validator
 
 from .core import Hash, Identifier, Mode, Money, NonnegativeInt, PositiveInt, Record, SignedDecimal, UTC, money_from_micros, usd_micros
-from .requests import RequestFeatures
+from .requests import RequestFeatures as RequestFeatures
 from .governance import ApprovalPayload, EvidenceTuple, EvaluationRecord, HaltState
 from .accounting import AccountingTotals
 from .journey import OperationState
