@@ -7,6 +7,7 @@ import json
 
 import pytest
 
+from gateway.cli.evaluation import main as evaluation_main
 from gateway.evaluation.artifacts import validate_artifacts
 from gateway.evaluation.dataset import load_development
 from gateway.evaluation.reporting import evaluation_json, render_evaluation
@@ -23,6 +24,15 @@ def run(case, receipts=None, **overrides):
 
 def overall(report, route):
     return next(row for row in report.route_rows if row.route == route and row.family is None)
+
+
+@pytest.mark.parametrize("mode,code", [("mock", "dependency_unavailable"),
+                                      ("live", "external_disabled"), ("recorded", "external_disabled")])
+def test_cli_never_acquires_or_reads_paths_without_injected_services(mode, code, capsys):
+    assert evaluation_main(["--mode", mode, "--spec", "not-read-spec.json", "--policy",
+                            "not-read-policy.json", "--authorization", "not-read-auth.json"]) == 2
+    captured = capsys.readouterr()
+    assert not captured.out and json.loads(captured.err) == {"error": code}
 
 
 def test_exact_public_development_split(evaluation_case):
