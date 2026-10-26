@@ -246,6 +246,8 @@ class Ledger:
     def _stored_times(row):
         """Validate the durable effective/raw UTC pair without repairing evidence."""
         try:
+            if not isinstance(row["last_seen"], str) or not isinstance(row["last_wall"], str):
+                raise ValueError
             effective = _utc(row["last_seen"])
             wall = _utc(row["last_wall"])
             if (effective.utcoffset() != timedelta(0)
