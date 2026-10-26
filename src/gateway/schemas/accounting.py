@@ -4,7 +4,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Annotated, Literal
 from pydantic import Field, model_validator
-from .core import Hash, Identifier, Money, NonnegativeInt, Provider, Record, UTC, usd_micros
+from .core import Hash, Identifier, Money, NonnegativeInt as NonnegativeInt, Provider, Record, UTC, usd_micros
 
 
 class BudgetAuthority(Record):
