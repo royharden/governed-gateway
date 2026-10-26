@@ -251,3 +251,33 @@ def test_malformed_schema2_clock_is_closed_error(artifact_dir):
     finally:
         if reopened is not None:
             reopened.close()
+
+
+def test_original_v1_implementation_refuses_schema2(artifact_dir):
+    """Run the exact licensed captured baseline, not an imitation of its guard."""
+    import hashlib
+    import os
+    from pathlib import Path
+    import subprocess
+    import sys
+    import types
+    root = Path(os.environ.get("M8_SOURCE_ROOT", Path(__file__).resolve().parents[1]))
+    captured = subprocess.check_output(["git", "-C", str(root), "show",
+        "e6d757705296fc08fa171853e77129a0229e187f:src/gateway/shared/s3/callledger/ledger.py"])
+    assert hashlib.sha256(captured).hexdigest() == "fefa367871c857d0bec3fb92f83647a4e86044296d9d221c68d57d27e36f34f1"
+    module = types.ModuleType("gateway.shared.s3.callledger._rv1_captured_v1")
+    module.__package__ = "gateway.shared.s3.callledger"
+    sys.modules[module.__name__] = module
+    exec(compile(captured, "<pinned-M8-schema1-ledger>", "exec"), module.__dict__)
+    config = configuration()
+    path = artifact_dir / "m8-legacy-rejection.sqlite3"
+    clock = Clocks(config)
+    ledger = open_ledger(path, config)
+    ledger.close()
+    before = financial_snapshot(path)
+    with sqlite3.connect(path) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 2, "new schema required for old-code rejection control"
+    with pytest.raises(module.LedgerError, match="schema_version"):
+        module.Ledger(path, authority=config.authority, price_snapshot=config.price_snapshot,
+            trusted_bounds=config.trusted_bounds, clock=lambda: clock.wall, monotonic=lambda: 0.0)
+    assert financial_snapshot(path) == before
