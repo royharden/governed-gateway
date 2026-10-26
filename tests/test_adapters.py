@@ -85,4 +85,3 @@ def test_billing_and_finish_semantics(provider, case):
         assert result.status == "provider_error"
     else:
         assert result.status == ("truncated" if case == "truncation" else "refused")
-
