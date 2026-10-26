@@ -106,11 +106,11 @@ def legacy_database(path, config, *, halted=False):
         PRAGMA user_version=1;
         """)
         db.execute("INSERT INTO authorities VALUES(?,?,?,?)", (config.authority.authority_id, encode(config.authority.model_dump(mode="json")), int(halted), stamp))
-        db.execute("INSERT INTO operations VALUES(?,?,?,?,?,?,?,?,?,?,?)", ("operation", config.authority.authority_id, "allocation", plan.plan_sha256,
+        db.execute("INSERT INTO operations VALUES(?,?,?,?,?,?,?,?,?,?)", ("operation", config.authority.authority_id, "allocation", plan.plan_sha256,
             encode(plan.model_dump(mode="json")), encode(context.model_dump(mode="json")), encode(config.limits.model_dump(mode="json")), "simulation", config.authority.run_deadline_utc, "pending"))
         for index, child in enumerate(plan.children):
             policy = next(p for p in config.price_snapshot.policies if p.model == child.model)
-            db.execute("INSERT INTO children VALUES(?,?,?,?,?,?,?,?,?,?,?)", ("operation", child.child_id, encode(child.model_dump(mode="json")), encode(policy.model_dump(mode="json")),
+            db.execute("INSERT INTO children VALUES(?,?,?,?,?,?,?,?,?,?)", ("operation", child.child_id, encode(child.model_dump(mode="json")), encode(policy.model_dump(mode="json")),
                 1 if index == 3 else 0, 0 if index == 3 else 1, 0, "pending", None, config.price_snapshot.snapshot_sha256))
             if index < 3:
                 state = ("known", "unknown", "active")[index]
