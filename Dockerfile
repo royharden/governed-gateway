@@ -11,4 +11,5 @@ COPY fixtures /app/fixtures
 COPY tests/eval /app/tests/eval
 COPY tests/docker /app/tests/docker
 COPY docker/run_sqlite_e2e.py /app/docker/run_sqlite_e2e.py
+ENV TMPDIR=/m8-runtime
 ENTRYPOINT ["python", "/app/docker/run_sqlite_e2e.py"]

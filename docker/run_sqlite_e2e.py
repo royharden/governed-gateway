@@ -32,6 +32,7 @@ def main():
     os.environ["GATEWAY_RUNTIME_ROOT"] = str(runtime)
     os.environ["M8_TEST_RUNTIME_PARENT"] = str(parent)
     os.environ["M8_DOCKER_CONFIG"] = str(config_path)
+    os.environ["TMPDIR"] = str(runtime)
     results = []
     for label, command in (
         ("public-development", [sys.executable, "-m", "pytest", "/app/tests/eval", "-q", "--tb=short", "-p", "no:cacheprovider"]),

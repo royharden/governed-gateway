@@ -13,6 +13,7 @@ new named volume and container, both `m8-r03-*`, with labels
 `agentports.project=m8`, `agentports.instance=r03-rv2`, `agentports.owner=0064`.
 Mount the volume at `/m8-runtime`, use `--network none`, `--read-only`,
 `--cap-drop ALL`, `--security-opt no-new-privileges`, and publish no port.
+Temporary test capture files use that writable owned volume via `TMPDIR`.
 The ledger reserves 22500 but this batch starts no listener.
 
 The runner preserves its fresh explicit synthetic authority config, SQLite
