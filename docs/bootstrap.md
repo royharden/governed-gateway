@@ -30,11 +30,19 @@ The process-local high-water implementation keeps one private SQLite connection
 for the context lifetime. Each clock invocation still validates the full runtime
 path, checks the pinned database identity and authority configuration, reads durable
 time, checks rollback/drift, and commits its compare-and-swap under the authority
-lock. It never reuses an observed time between calls. Recursive observations refuse;
-threads serialize through the same lock. Forked, closed, replaced-path, or failed
-handles refuse rather than reconnect. Closing the context also closes this handle;
-bootstrap failures attempt both ledger and high-water cleanup. These lifecycle
-rules require the independent clock/path/storage checks before acceptance.
+lock. It never reuses an observed time between calls. Recursive observations and
+evidence requested during an observation refuse and permanently close trust, even
+if a callback catches the inner error. Guard/observation entry, body and exit errors
+also permanently deny time and evidence; restoring a guard cannot revive the
+instance. Owner PID checks precede guard access, including standalone reads and
+compare-and-swap. Threads serialize through the same lock. Forked, closed,
+replaced-path, or failed handles refuse rather than reconnect. Failure first
+latches trust closed without closing another thread's active SQLite handle;
+disposal occurs under the authority guard after the active observation exits.
+Failed guard acquisition defers disposal until a safe guarded cleanup is possible.
+Closing the context also closes this handle; bootstrap failures attempt both
+ledger and high-water cleanup. These lifecycle rules require the independent
+clock/path/storage checks before acceptance.
 
 This is source construction, not a verified runnable demo or runtime/product acceptance. No bootstrap, database, signing, acquisition, installation or test was executed while authoring it. Real provider APIs and protected-file key loaders are not wired here.
 
