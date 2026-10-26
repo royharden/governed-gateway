@@ -13,7 +13,7 @@ from gateway.schemas import ErrorCode, GatewayError
     "", ".", "..", "../outside", "nested/file", "nested\\file", "/absolute",
     "C:\\absolute", "C:relative", "db:stream", "\\\\host\\share", "nul\0db",
     "trailing.", "trailing ", "CON", "con.sqlite3", "PRN", "AUX.txt", "NUL",
-    "COM1.db", "LPT9", "COM¹", "LPT².txt",
+    "COM1.db", "LPT9", "COM¹", "LPT².txt", "cOn.TxT", "LpT1.log",
 ])
 def test_filename_alias_or_escape_refused(artifact_dir, filename):
     with pytest.raises(GatewayError) as error:
@@ -44,6 +44,16 @@ def test_missing_child_preserves_existing_semantics(artifact_dir):
     with pytest.raises(GatewayError) as error:
         _database_path(artifact_dir, name, existing=True)
     assert error.value.code == ErrorCode.STORE_UNAVAILABLE
+
+
+def test_differently_expressed_root_still_canonicalizes(artifact_dir):
+    root = artifact_dir / "m8-canonical-root"
+    root.mkdir()
+    child = root / "m8-child.sqlite3"
+    child.write_bytes(b"synthetic file, not an initialized database")
+    expression = root / ".." / root.name
+    assert require_local_runtime_root(expression) == root
+    assert _database_path(expression, child.name, existing=True) == child
 
 
 def test_directory_child_refused(artifact_dir):
@@ -132,3 +142,34 @@ def test_root_replaced_with_file_during_validation_refused(artifact_dir, monkeyp
         require_local_runtime_root(root)
     assert error.value.code == ErrorCode.UNSAFE_RUNTIME_PATH
     assert changed and root.is_file() and preserved.is_dir()
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_parent_replaced_with_outside_link_before_child_lstat_refused(artifact_dir, monkeypatch, existing):
+    """Old child.resolve containment rejected this within-call outside traversal."""
+    root = artifact_dir / "m8-parent"
+    outside = artifact_dir / "m8-outside"
+    preserved = artifact_dir / "m8-parent-preserved"
+    root.mkdir()
+    outside.mkdir()
+    name = "m8-child.sqlite3"
+    path = root / name
+    path.write_bytes(b"synthetic original, preserved without deletion")
+    (outside / name).write_bytes(b"synthetic outside file")
+    original = Path.lstat
+    changed = False
+    def replace_before_child_stat(candidate, *args, **kwargs):
+        nonlocal changed
+        if candidate == path and not changed:
+            changed = True
+            root.rename(preserved)
+            try:
+                root.symlink_to(outside, target_is_directory=True)
+            except OSError:
+                pytest.skip("OS directory symlink privilege unavailable; original preserved")
+        return original(candidate, *args, **kwargs)
+    monkeypatch.setattr(Path, "lstat", replace_before_child_stat)
+    with pytest.raises(GatewayError) as error:
+        _database_path(root, name, existing=existing)
+    assert error.value.code == ErrorCode.UNSAFE_RUNTIME_PATH
+    assert changed and root.is_symlink() and preserved.is_dir()
