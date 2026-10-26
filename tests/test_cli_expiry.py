@@ -70,6 +70,7 @@ def test_expired_config_refuses_before_funding():
     assert Path(command[4]).resolve() == config and command[5:] == ["--initialize"]
     assert plan.get("timeout_seconds", 30) == 30
     assert Path(environment["M8_SOURCE_ROOT"]).resolve() == root
+    assert Path(environment["GATEWAY_RUNTIME_ROOT"]).resolve() == runtime
     assert [Path(value).resolve() for value in environment["PYTHONPATH"].split(os.pathsep)] == [
         root / "src", Path(__file__).resolve().parent]
     started = time.monotonic()
