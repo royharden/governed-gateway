@@ -66,7 +66,7 @@ def test_consumer_funding_claim_unknown_reopen(artifact_dir, monkeypatch):
             evidence = ledger.register_envelope(envelope)
             reserved = ledger.reserve_for(envelope)
             permit = OperationPermit(permit_id="permit", operation_id="operation", authority_id="m8-consumer", caller_id="client",
-                request_sha256=request.request_sha256, policy_generation=1, state=PermitState.PERMITTED,
+                request_sha256=request.request_sha256, policy_generation=1, state=PermitState.PERMITTED, purpose="serve",
                 policy_bundle_sha256="b"*64, chosen_target_ids=("B0",),
                 attempt_children=(AttemptChild(child_id="child", target_id="B0", purpose="serve", conditional=False,
                     provider="openai", model=profile.exact_model, maximum_liability_usd=reserved, request_evidence_sha256=evidence),),

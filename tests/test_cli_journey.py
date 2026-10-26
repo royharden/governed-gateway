@@ -11,8 +11,14 @@ def test_public_fixture_cli_journey(simulation_config):
     environment = os.environ.copy()
     environment["PYTHONPATH"] = str(root / "src")
     environment["GATEWAY_RUNTIME_ROOT"] = str(simulation_config.parent)
-    result = subprocess.run([sys.executable, "-m", "gateway.bootstrap", "--config", str(simulation_config), "--initialize"],
-        env=environment, capture_output=True, text=True, timeout=180)
+    try:
+        result = subprocess.run([sys.executable, "-m", "gateway.bootstrap", "--config", str(simulation_config), "--initialize"],
+            env=environment, capture_output=True, text=True, timeout=180)
+    except subprocess.TimeoutExpired as error:
+        for name, value in (("stdout", error.stdout), ("stderr", error.stderr)):
+            data = value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value or ""
+            (simulation_config.parent / (name + ".txt")).write_text(data, encoding="utf-8")
+        raise AssertionError(f"CLI exceeded180s; preserved partial output at {simulation_config.parent}") from error
     (simulation_config.parent / "stdout.txt").write_text(result.stdout, encoding="utf-8")
     (simulation_config.parent / "stderr.txt").write_text(result.stderr, encoding="utf-8")
     assert result.returncode == 0, f"CLI exit={result.returncode}; {result.stderr[-1500:]}; artifacts={simulation_config.parent}"
