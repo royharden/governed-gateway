@@ -83,7 +83,8 @@ def test_sqlite_packaged_journey_and_reopen():
     # process with lost keys is deliberately not claimed as supported recovery.
     reopened = build_mock_context(spec, initialize=False, signer=signer)
     try:
-        assert reopened.ledger.totals(authority_id=spec.authority_id) == totals
+        with reopened.guard.hold(spec.authority_id):
+            assert reopened.ledger.totals(authority_id=spec.authority_id) == totals
     finally:
         reopened.close()
     with pytest.raises(GatewayError):
