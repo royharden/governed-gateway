@@ -26,6 +26,16 @@ baseline. R03 dependency sync, package import, bootstrap `--help`, and archive/w
 build have executed on Windows with Python 3.12.13. These checks do not establish
 the full journey, restart, custody, live-provider, or product acceptance obligations.
 
+The process-local high-water implementation keeps one private SQLite connection
+for the context lifetime. Each clock invocation still validates the full runtime
+path, checks the pinned database identity and authority configuration, reads durable
+time, checks rollback/drift, and commits its compare-and-swap under the authority
+lock. It never reuses an observed time between calls. Recursive observations refuse;
+threads serialize through the same lock. Forked, closed, replaced-path, or failed
+handles refuse rather than reconnect. Closing the context also closes this handle;
+bootstrap failures attempt both ledger and high-water cleanup. These lifecycle
+rules require the independent clock/path/storage checks before acceptance.
+
 This is source construction, not a verified runnable demo or runtime/product acceptance. No bootstrap, database, signing, acquisition, installation or test was executed while authoring it. Real provider APIs and protected-file key loaders are not wired here.
 
 The intended entrypoint is `python -m gateway.bootstrap --config <absolute-nonsecret-simulation.json> --initialize`, from an installed package or a separately configured src-layout Python environment. It builds concrete trusted services and calls the actual packaged `gateway.cli.demo.main(services=...)`. Calling `gateway.cli.demo.main()` without injected services still fails closed; it does not implicitly bootstrap or load a dotenv file.

@@ -144,51 +144,139 @@ class MockRuntimeSpec:
 
 
 class _PolicyHighWater(ClockHighWater):
+    """One private process-local connection; every observation still commits time."""
     def __init__(self, path: Path, *, authority_id: str, guard: AuthorityLock,
                  policy_config_sha256: str) -> None:
         self.path, self.authority_id, self.guard = path, authority_id, guard
         self.config_sha256 = policy_config_sha256
+        self._pid = os.getpid()
+        self._connection = None
+        self._identity = None
+        self._observing = False
+        self._closed = False
+
+    def assert_owner(self) -> None:
+        _require(os.getpid() == self._pid and not self._closed,
+                 ErrorCode.CLOCK_UNTRUSTED)
+
+    def _invalidate(self) -> None:
+        connection, self._connection = self._connection, None
+        self._closed = True
+        # Never use an inherited SQLite handle in a forked process.
+        if connection is not None and os.getpid() == self._pid:
+            try:
+                connection.close()
+            except sqlite3.Error:
+                pass
+
+    def close(self) -> None:
+        if os.getpid() != self._pid:
+            self._closed = True
+            return
+        with self.guard.hold(self.authority_id):
+            self._invalidate()
+
+    @contextmanager
+    def observation(self):
+        self.assert_owner()
+        with self.guard.hold(self.authority_id):
+            self.assert_owner()
+            # Recursive clock invocations must validate independently, not borrow
+            # a partially checked outer observation or its connection.
+            _require(not self._observing, ErrorCode.CLOCK_UNTRUSTED)
+            try:
+                path = _database_path(self.path.parent, self.path.name, existing=True)
+                info = path.stat()
+                identity = (info.st_dev, info.st_ino)
+                _require(info.st_ino != 0, ErrorCode.STORE_UNAVAILABLE)
+                if self._identity is None:
+                    self._identity = identity
+                _require(identity == self._identity, ErrorCode.STORE_UNAVAILABLE)
+                if self._connection is None:
+                    connection = sqlite3.connect(path.as_uri() + "?mode=rw", uri=True,
+                        isolation_level=None, timeout=5, check_same_thread=False)
+                    self._connection = connection
+                    connection.execute("PRAGMA foreign_keys=ON")
+                    connection.execute("PRAGMA synchronous=FULL")
+                    _require(connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+                        and connection.execute("PRAGMA synchronous").fetchone()[0] == 2
+                        and connection.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal",
+                        ErrorCode.SCHEMA_MISMATCH)
+                    checked = _database_path(self.path.parent, self.path.name, existing=True).stat()
+                    _require((checked.st_dev, checked.st_ino) == identity,
+                             ErrorCode.STORE_UNAVAILABLE)
+                self._observing = True
+                yield
+            except GatewayError:
+                self._invalidate()
+                raise
+            except (sqlite3.Error, OSError, ValueError, TypeError):
+                self._invalidate()
+                raise GatewayError(ErrorCode.STORE_UNAVAILABLE) from None
+            except BaseException:
+                self._invalidate()
+                raise
+            finally:
+                self._observing = False
+
+    def _active_connection(self):
+        self.assert_owner()
+        self.guard.assert_held(authority_id=self.authority_id)
+        _require(self._observing and self._connection is not None,
+                 ErrorCode.CLOCK_UNTRUSTED)
+        return self._connection
 
     def read(self) -> datetime:
         with self.guard.hold(self.authority_id):
-            with _policy_connection(self.path) as connection:
-                row = connection.execute(
-                    "SELECT max_observed_utc,config_sha256 FROM authority_state WHERE authority_id=?",
-                    (self.authority_id,),
-                ).fetchone()
-                _require(row is not None and row[1] == self.config_sha256, ErrorCode.CLOCK_UNTRUSTED)
-                return _read_stamp(row[0])
+            if not self._observing:
+                with self.observation():
+                    return self.read()
+            row = self._active_connection().execute(
+                "SELECT max_observed_utc,config_sha256 FROM authority_state WHERE authority_id=?",
+                (self.authority_id,),
+            ).fetchone()
+            _require(row is not None and row[1] == self.config_sha256, ErrorCode.CLOCK_UNTRUSTED)
+            return _read_stamp(row[0])
 
     def compare_and_advance(self, expected: datetime, observed: datetime) -> bool:
         _require(_utc(observed) >= _utc(expected), ErrorCode.CLOCK_ROLLBACK)
         with self.guard.hold(self.authority_id):
-            with _policy_connection(self.path) as connection:
-                connection.execute("BEGIN IMMEDIATE")
-                changed = connection.execute(
-                    "UPDATE authority_state SET max_observed_utc=? WHERE authority_id=? "
-                    "AND config_sha256=? AND max_observed_utc=?",
-                    (_stamp(observed), self.authority_id, self.config_sha256, _stamp(expected)),
-                ).rowcount
-                if changed != 1:
-                    connection.rollback()
-                    return False
-                connection.commit()
-                return True
+            if not self._observing:
+                with self.observation():
+                    return self.compare_and_advance(expected, observed)
+            connection = self._active_connection()
+            connection.execute("BEGIN IMMEDIATE")
+            changed = connection.execute(
+                "UPDATE authority_state SET max_observed_utc=? WHERE authority_id=? "
+                "AND config_sha256=? AND max_observed_utc=?",
+                (_stamp(observed), self.authority_id, self.config_sha256, _stamp(expected)),
+            ).rowcount
+            if changed != 1:
+                connection.rollback()
+                return False
+            connection.commit()
+            return True
 
 
 class _AuthorityClock(TrustedClock):
-    """Acquire the OS guard BEFORE TrustedClock's thread lock to avoid inversion."""
+    """OS guard, one high-water observation, then TrustedClock's thread lock."""
     def __init__(self, *, guard: AuthorityLock, authority_id: str, **kwargs) -> None:
         self._guard, self._authority_id = guard, authority_id
         super().__init__(**kwargs)
 
     def __call__(self) -> datetime:
+        self._high_water.assert_owner()
         with self._guard.hold(self._authority_id):
-            return super().__call__()
+            with self._high_water.observation():
+                return super().__call__()
 
     def evidence_sha256(self) -> str:
+        self._high_water.assert_owner()
         with self._guard.hold(self._authority_id):
             return super().evidence_sha256()
+
+    def close(self) -> None:
+        self._high_water.close()
 
 
 def _initialize_policy_database(path: Path, *, spec: MockRuntimeSpec,
@@ -248,7 +336,7 @@ class MockRuntimeContext:
     configuration: LedgerConfiguration
     authority: BudgetAuthority
     guard: AuthorityLock
-    clock: TrustedClock
+    clock: _AuthorityClock
     profiles: ApprovedProfileRegistry
     contexts: EvidenceContextLoader
     policies: PolicyStore
@@ -293,7 +381,10 @@ class MockRuntimeContext:
 
     def close(self) -> None:
         with self.guard.hold(self.authority.authority_id):
-            self.ledger.close()
+            try:
+                self.ledger.close()
+            finally:
+                self.clock.close()
 
 
 def build_mock_context(spec: MockRuntimeSpec, *, initialize: bool = False,
@@ -308,6 +399,7 @@ def build_mock_context(spec: MockRuntimeSpec, *, initialize: bool = False,
     fail rather than reset the finite authority. Protected file key loaders are absent.
     """
     ledger = None
+    high_water = None
     try:
         root = require_local_runtime_root(spec.runtime_root)
         configured_root = os.environ.get("GATEWAY_RUNTIME_ROOT")
@@ -437,14 +529,25 @@ def build_mock_context(spec: MockRuntimeSpec, *, initialize: bool = False,
         return MockRuntimeContext(spec, configuration, authority, guard, clock, profiles,
                                   contexts, policies, ledger, gate, authenticator, cipher, controller, signer,
                                   SimulationObservationJournal())
-    except GatewayError:
-        if ledger is not None:
-            ledger.close()
+    except BaseException as error:
+        # Preserve the original failure while attempting every owned close.
+        # A failed bootstrap never returns a usable context or resets stores.
+        try:
+            if ledger is not None:
+                ledger.close()
+        except Exception:
+            pass
+        try:
+            if high_water is not None:
+                high_water.close()
+        except Exception:
+            pass
+        if isinstance(error, GatewayError):
+            raise
+        if isinstance(error, (OSError, sqlite3.Error, ValueError, TypeError,
+                              AttributeError, ImportError)):
+            raise GatewayError(ErrorCode.DEPENDENCY_UNAVAILABLE) from None
         raise
-    except (OSError, sqlite3.Error, ValueError, TypeError, AttributeError, ImportError):
-        if ledger is not None:
-            ledger.close()
-        raise GatewayError(ErrorCode.DEPENDENCY_UNAVAILABLE) from None
 
 
 def build_operator_services(context: MockRuntimeContext) -> OperatorServices:
