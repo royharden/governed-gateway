@@ -246,7 +246,7 @@ class LedgerAdapter:
                 raise AccountingError(ErrorCode.HALTED)
             with self._read() as connection:
                 prior=self._operation(connection,permit.operation_id)
-            allocation=self._ledger.admit_operation(plan,context=context,limits=limits,mode="simulation")
+            _allocation=self._ledger.admit_operation(plan,context=context,limits=limits,mode="simulation")
             # S3's property sums Decimal values under the caller's context. Protect
             # the returned projection just as S3 protects its committed funding.
             with localcontext() as context_precision:
