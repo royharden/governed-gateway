@@ -2,9 +2,9 @@
 from decimal import Decimal, localcontext
 from collections.abc import Mapping, Sequence
 from gateway.schemas import (
-    AccountingTotals, ErrorCode, IncidentSnapshot, LedgerJoin, SettlementReceipt,
+    AccountingTotals, ErrorCode, IncidentSnapshot, LedgerJoin as LedgerJoin, SettlementReceipt,
 )
-from gateway.shared.s3.callledger.models import canonical_digest
+from gateway.shared.s3.callledger.models import canonical_digest as canonical_digest
 from .errors import AccountingError
 
 
