@@ -116,6 +116,11 @@ Runtime SQLite databases, WAL and companion files reside together on a local,
 nonsynced disk outside OneDrive. INT owns versioned migrations. Governance opens
 only a compatible pre-migrated authority and refuses incompatible schema or
 authority configuration. Database/write failures cannot create an admission.
+Before opening each policy-store connection, the shared locality validator
+freshly validates the configured runtime root. When the database parent is that
+exact canonical directory, the same invocation reuses that validation; other
+parents receive their own full check. No locality result is cached between
+connections; nested operations retain their existing transaction.
 Backups use SQLite's supported consistent procedure; copying only a live main
 database file is not a recovery plan. No runtime database is created during the
 source-only construction phase.

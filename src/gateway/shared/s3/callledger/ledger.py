@@ -143,12 +143,18 @@ class Ledger:
     def _initialize(self):
         with self._transaction():
             version = self.connection.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1):
+            if version not in (0, 1, 2):
+                raise LedgerError("schema_version")
+            # M8-S3-CLOCK-1: an unversioned store must be empty. Never guess
+            # whether existing authority rows are safe to initialize or migrate.
+            if version == 0 and self.connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='authorities'"
+            ).fetchone() is not None:
                 raise LedgerError("schema_version")
             statements = [
                 "CREATE TABLE IF NOT EXISTS authorities (id TEXT PRIMARY KEY, "
                 "definition TEXT NOT NULL, halted INTEGER NOT NULL DEFAULT 0, last_seen"
-                " TEXT NOT NULL)",
+                " TEXT NOT NULL, last_wall TEXT NOT NULL)",
                 "CREATE TABLE IF NOT EXISTS operations (id TEXT PRIMARY KEY, "
                 "authority_id TEXT NOT NULL REFERENCES authorities(id), allocation_id "
                 "TEXT UNIQUE NOT NULL, plan_sha TEXT NOT NULL, plan TEXT NOT NULL, "
@@ -177,7 +183,25 @@ class Ledger:
             ]
             for statement in statements:
                 self.connection.execute(statement)
-            self.connection.execute("PRAGMA user_version=1")
+            columns = {row["name"]: row for row in self.connection.execute(
+                "PRAGMA table_info(authorities)"
+            )}
+            if version == 1:
+                if "last_wall" in columns:
+                    raise LedgerError("schema_version")
+                # Legacy last_seen may include monotonic advancement. It is the
+                # only durable floor available: preserve it conservatively rather
+                # than inventing the raw historical wall clock. No financial rows
+                # or existing effective deadlines change in this atomic migration.
+                self.connection.execute(
+                    "ALTER TABLE authorities ADD COLUMN last_wall TEXT NOT NULL DEFAULT ''"
+                )
+                self.connection.execute("UPDATE authorities SET last_wall=last_seen")
+            elif "last_wall" not in columns or not columns["last_wall"]["notnull"]:
+                raise LedgerError("schema_version")
+            for row in self.connection.execute("SELECT last_seen,last_wall FROM authorities"):
+                self._stored_times(row)
+            self.connection.execute("PRAGMA user_version=2")
             if self.snapshot is not None:
                 self.connection.execute(
                     "INSERT OR IGNORE INTO price_snapshots VALUES(?,?)",
@@ -191,9 +215,10 @@ class Ledger:
                 if previous[0] != definition:
                     raise LedgerError("authority_conflict")
             else:
+                observed = self._now().isoformat()
                 self.connection.execute(
-                    "INSERT INTO authorities(id,definition,last_seen) VALUES(?,?,?)",
-                    (self.authority.authority_id, definition, self._now().isoformat()),
+                    "INSERT INTO authorities(id,definition,last_seen,last_wall) VALUES(?,?,?,?)",
+                    (self.authority.authority_id, definition, observed, observed),
                 )
                 self._emit("authority_created", {"scope_sha256": self.authority.scope_sha256})
 
@@ -217,6 +242,21 @@ class Ledger:
         )
         self.connection.execute("INSERT INTO outbox(sequence) VALUES(?)", (cursor.lastrowid,))
 
+    @staticmethod
+    def _stored_times(row):
+        """Validate the durable effective/raw UTC pair without repairing evidence."""
+        try:
+            if not isinstance(row["last_seen"], str) or not isinstance(row["last_wall"], str):
+                raise ValueError
+            effective = _utc(row["last_seen"])
+            wall = _utc(row["last_wall"])
+            if (effective.utcoffset() != timedelta(0)
+                or wall.utcoffset() != timedelta(0) or wall > effective):
+                raise ValueError
+            return effective, wall
+        except (ValueError, TypeError, KeyError, IndexError, OverflowError):
+            raise LedgerError("clock_state") from None
+
     def _time(self, *, funded=True):
         now = self._now()
         effective = self._anchor_wall + timedelta(
@@ -225,9 +265,14 @@ class Ledger:
         row = self.connection.execute(
             "SELECT * FROM authorities WHERE id=?", (self.authority.authority_id,)
         ).fetchone()
-        if funded and now < _utc(row["last_seen"]):
+        previous_effective, previous_wall = self._stored_times(row)
+        if funded and now < previous_wall:
             raise LedgerError("clock_rollback")
-        now = max(now, effective, _utc(row["last_seen"]))
+        # Compare raw observations only; monotonic advancement must never be
+        # mistaken for a backwards wall tick. Both high-water marks survive
+        # reopen and competing workers through this same IMMEDIATE transaction.
+        observed_wall = max(now, previous_wall)
+        now = max(now, effective, previous_effective)
         if funded and row["halted"]:
             raise LedgerError("halted")
         if funded and (
@@ -236,8 +281,8 @@ class Ledger:
         ):
             raise LedgerError("deadline")
         self.connection.execute(
-            "UPDATE authorities SET last_seen=? WHERE id=?",
-            (now.isoformat(), self.authority.authority_id),
+            "UPDATE authorities SET last_seen=?,last_wall=? WHERE id=?",
+            (now.isoformat(), observed_wall.isoformat(), self.authority.authority_id),
         )
         return now
 
