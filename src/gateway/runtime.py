@@ -73,13 +73,18 @@ def require_local_runtime_root(root: Path) -> Path:
         if os.name == "nt":
             _require(bool(root.drive), ErrorCode.UNSAFE_RUNTIME_PATH)
         original = root
+        root_attributes = original.lstat()
         for ancestor in (original, *original.parents):
-            attributes = ancestor.lstat()
+            attributes = root_attributes if ancestor == original else ancestor.lstat()
             _require(not stat.S_ISLNK(attributes.st_mode)
                      and not (getattr(attributes, "st_file_attributes", 0) & 0x400),
                      ErrorCode.UNSAFE_RUNTIME_PATH)
         resolved = root.resolve(strict=True)
-        _require(resolved.is_dir(), ErrorCode.UNSAFE_RUNTIME_PATH)
+        # Reuse only metadata already obtained in this validation call. A
+        # differently expressed root still checks the resolved directory.
+        is_directory = (stat.S_ISDIR(root_attributes.st_mode)
+                        if resolved == original else resolved.is_dir())
+        _require(is_directory, ErrorCode.UNSAFE_RUNTIME_PATH)
         denied = {"onedrive", ".chatexports", "dropbox", "google drive", "googledrive",
                   "icloud", "icloud drive", "box", "box sync"}
         _require(not any(part.casefold() in denied or part.casefold().startswith("onedrive -")
