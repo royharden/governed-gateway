@@ -1,5 +1,6 @@
 """Routine-runner selection controls; no CLI, process or journey is executed."""
 import asyncio
+import importlib.machinery
 import importlib.util
 import os
 from pathlib import Path
@@ -73,6 +74,62 @@ def mocked_run(runner, monkeypatch):
     execute = Mock(return_value=0)
     monkeypatch.setattr(runner.subprocess, "call", execute)
     return execute
+
+
+@pytest.mark.parametrize("safe_path", [None, "", "0"])
+def test_python_safe_path_is_explicit_despite_inherited_environment(
+    runner, monkeypatch, mocked_run, safe_path,
+):
+    # what_bug_this_catches: relying on an optional inherited safe-path setting
+    # leaves Python free to import caller pytest.py before pytest's controls.
+    if safe_path is None:
+        monkeypatch.delenv("PYTHONSAFEPATH", raising=False)
+    else:
+        monkeypatch.setenv("PYTHONSAFEPATH", safe_path)
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join(("untrusted-caller", "")))
+    caller = Path.cwd()
+    assert runner.main() == 0
+    command = mocked_run.call_args.args[0]
+    assert command[:5] == [sys.executable, "-B", "-P", "-m", "pytest"]
+    environment = mocked_run.call_args.kwargs["env"]
+    root = Path(runner.__file__).resolve().parents[1]
+    assert environment["PYTHONPATH"].split(os.pathsep) == [str(root / "src"), str(root / "tests")]
+    assert environment.get("PYTHONSAFEPATH") == safe_path
+    assert os.environ.get("PYTHONSAFEPATH") == safe_path
+    assert os.environ["PYTHONPATH"] == os.pathsep.join(("untrusted-caller", ""))
+    assert Path.cwd() == caller
+    assert "cwd" not in mocked_run.call_args.kwargs
+
+
+def test_caller_directory_cannot_replace_pytest_startup_module(
+    runner, monkeypatch, mocked_run, artifact_dir,
+):
+    # what_bug_this_catches: a caller pytest.py can replace the pinned package
+    # before any pytest selection, configuration or plugin isolation takes effect.
+    # Only ask PathFinder for specs over explicit lists; never load the shadow
+    # module, run a child process, or change this test process's working directory.
+    caller = artifact_dir / "caller"
+    caller.mkdir()
+    shadow = caller / "pytest.py"
+    shadow.write_text("# Inert module-lookup fixture; never executed.\n", encoding="utf-8")
+    monkeypatch.delenv("PYTHONSAFEPATH", raising=False)
+    actual_cwd = Path.cwd()
+    assert runner.main() == 0
+    command = mocked_run.call_args.args[0]
+    environment = mocked_run.call_args.kwargs["env"]
+    module_index = command.index("-m")
+    assert command[module_index + 1] == "pytest"
+    pinned_pytest = Path(pytest.__file__).resolve()
+    trusted_paths = [*environment["PYTHONPATH"].split(os.pathsep), str(pinned_pytest.parent.parent)]
+    assert all(trusted_paths) and str(caller) not in trusted_paths
+    unprotected = importlib.machinery.PathFinder.find_spec("pytest", [str(caller), *trusted_paths])
+    assert unprotected is not None and Path(unprotected.origin).resolve() == shadow
+    # Model Python -m's automatic caller prefix only when safe path is absent.
+    safe_startup = "-P" in command[1:module_index] or bool(environment.get("PYTHONSAFEPATH"))
+    startup_paths = trusted_paths if safe_startup else [str(caller), *trusted_paths]
+    protected = importlib.machinery.PathFinder.find_spec("pytest", startup_paths)
+    assert protected is not None and Path(protected.origin).resolve() == pinned_pytest
+    assert Path.cwd() == actual_cwd
 
 
 @pytest.mark.parametrize(("name", "value"), [

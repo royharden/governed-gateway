@@ -40,7 +40,9 @@ def main():
     # An empty explicit config prevents discovery of project/ancestor addopts,
     # pythonpath and plugin settings. Retain only this suite's trusted conftests
     # and the pinned dev dependency needed for async fixtures/tests.
-    command = [sys.executable, "-B", "-m", "pytest", "-c", os.devnull,
+    # Python must exclude the caller directory before resolving pytest itself;
+    # pytest's config/plugin controls apply only after that module is imported.
+    command = [sys.executable, "-B", "-P", "-m", "pytest", "-c", os.devnull,
                "--rootdir", str(root), "--confcutdir", str(test_root),
                "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin",
                "-q" if args.quiet else "-v", "--tb=" + args.tb, *map(str, selected)]
