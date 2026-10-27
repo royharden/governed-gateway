@@ -26,7 +26,7 @@ from gateway.cli.signing import confirmation_digest
 from gateway.cli.simulation import create_simulation_signer
 from gateway.controller.ports import CancellationToken
 from gateway.schemas import (
-    EvaluationAuthorizationPayload, GatewayRequest, OperationState,
+    DispatchTicket, EvaluationAuthorizationPayload, GatewayRequest, OperationState,
     OwnerExitEvidence, ProcessInstance, WireMessage, digest, request_digest,
 )
 
@@ -36,6 +36,10 @@ T0 = datetime(2026, 11, 1, 12, tzinfo=timezone.utc)
 CUTS = ("permit", "fund", "claim", "handoff", "stage", "settle", "terminal")
 EXIT_AT_CUT = 77
 MAXIMUM = Decimal("0.001024")
+# Public mock B0: (8 input * USD0 + 4 output * USD1) / million + USD0 fee.
+# This fixed oracle is independent of production pricing/conversion functions.
+KNOWN_MICROS = 4
+ACK_MAX_BYTES = 4096
 
 
 def integer_micros(amount):
@@ -65,9 +69,73 @@ def opened(spec, signer, clock, *, initialize=False):
         monotonic_source=lambda: clock[0] * 1_000_000_000)
 
 
-def acknowledge_and_die(sender, cut, marker):
-    message = json.dumps({"cut": cut, "pid": os.getpid(), "marker": marker}).encode()
-    assert len(message) < 1024
+def successful_totals(totals, reserved_micros):
+    assert totals["known_usd"] == KNOWN_MICROS
+    assert totals["released_usd"] == reserved_micros - KNOWN_MICROS
+    assert totals["unknown_usd"] == totals["active_usd"] == totals["future_usd"] == 0
+
+
+def replay_payload_hash(result):
+    # ReplayService.reply changes exactly these fields (service.py final return).
+    # Decrypted staged result below is compared WITHOUT any normalization.
+    return digest(result.model_dump(mode="python", exclude={"replayed", "result_expires_utc"}))
+
+
+def stage_witness(context, staged):
+    result = context.replay_cipher.decrypt(staged.encrypted_result, staged.binding)
+    receipt = staged.receipt
+    assert receipt.status == "ok" and receipt.error_code is None
+    assert receipt.state == receipt.cost_status == result.cost.status == "known"
+    assert (receipt.provider, receipt.model) == ("openai", "mock-openai-v1")
+    assert (receipt.usage.input_tokens, receipt.usage.output_tokens) == (8, 4)
+    assert all(getattr(receipt.usage, name) is None for name in (
+        "cache_read_tokens", "cache_write_tokens", "reasoning_tokens"))
+    assert integer_micros(receipt.known_usage_cost_usd) == KNOWN_MICROS
+    assert result.usage == receipt.usage and result.error is None and not result.replayed
+    assert integer_micros(result.cost.amount_usd) == KNOWN_MICROS
+    assert result.attempt_ids == (receipt.attempt_id,)
+    assert digest(result) == staged.encrypted_result.result_sha256
+    assert digest(staged.binding) == staged.encrypted_result.aad_sha256
+    return dict(result_sha256=digest(result), payload_sha256=replay_payload_hash(result),
+        receipt_sha256=digest(receipt), binding_sha256=digest(staged.binding),
+        encrypted_sha256=digest(staged.encrypted_result), permit_sha256=staged.permit_sha256)
+
+
+def ticket_witness(ticket):
+    # Closed body-free identity: no envelope payload, ticket repr, or key bytes.
+    return dict(ticket_sha256=digest(ticket), authority_id=ticket.authority_id,
+        operation_id=ticket.operation_id, child_id=ticket.child_id, attempt_id=ticket.attempt_id,
+        envelope_sha256=ticket.envelope_sha256, permit_sha256=ticket.permit_sha256,
+        reserved_micros=integer_micros(ticket.reserved_usd))
+
+
+def committed_ticket_witness(context, operation):
+    ledger = context.ledger.operation_state(operation.operation_id)
+    permit = operation.permit
+    assert ledger is not None and len(ledger.attempts) == len(permit.attempt_children) == 1
+    attempt, child = ledger.attempts[0], permit.attempt_children[0]
+    assert attempt.attempt_id is not None and attempt.child_id == child.child_id
+    assert (ledger.authority_id, ledger.operation_id, ledger.permit_sha256) == (
+        permit.authority_id, permit.operation_id, digest(permit))
+    assert ledger.join.serialized_envelope_sha256 == permit.serialized_envelope_sha256
+    ticket = DispatchTicket(authority_id=ledger.authority_id, operation_id=ledger.operation_id,
+        child_id=attempt.child_id, attempt_id=attempt.attempt_id, permit_sha256=ledger.permit_sha256,
+        envelope_sha256=ledger.join.serialized_envelope_sha256,
+        reserved_usd=child.maximum_liability_usd)
+    return ticket_witness(ticket)
+
+
+def assert_original_replay(context, operation, reply, original):
+    assert operation.staged_result is not None
+    assert stage_witness(context, operation.staged_result) == original
+    assert reply.http_status == 200 and reply.result is not None and reply.result.replayed
+    assert replay_payload_hash(reply.result) == original["payload_sha256"]
+    assert reply.result.result_expires_utc == operation.result_expires_utc
+
+
+def acknowledge_and_die(sender, cut, marker, witnesses):
+    message = json.dumps(dict(cut=cut, pid=os.getpid(), marker=marker, **witnesses)).encode()
+    assert len(message) < ACK_MAX_BYTES
     sender.send_bytes(message)
     sender.close()
     os._exit(EXIT_AT_CUT)
@@ -78,19 +146,40 @@ def worker(spec, signer, request, authorization_hash, cut, marker, sends, sender
     context = opened(spec, signer, [0])
     adapter = context.controller.planner.adapters["B0"]
     begin = adapter.begin_generate
+    witnesses = {}
+    remember = context.controller._remember_outcome
+
+    def checked_outcome(permit, ticket, response):
+        if cut in ("stage", "settle", "terminal"):
+            assert response.status == "ok" and response.error_code is None
+            assert response.usage.complete and response.usage.unknown_components == ()
+            assert (response.usage.input_tokens, response.usage.output_tokens) == (8, 4)
+        return remember(permit, ticket, response)
+    context.controller._remember_outcome = checked_outcome
+    original_stage = context.policies.stage_result
+
+    def captured_stage(*args, **kwargs):
+        staged = original_stage(*args, **kwargs)
+        witnesses["stage"] = stage_witness(context, staged)
+        if cut == "stage":
+            acknowledge_and_die(sender, cut, marker, witnesses)
+        return staged
+    context.policies.stage_result = captured_stage
 
     def spy(*args, **kwargs):
         pending = begin(*args, **kwargs)
         sends.value += 1  # One writer; supervisor reads only after verified exit.
+        assert sends.value == 1 and "ticket" not in witnesses
+        # Synchronous witness AFTER actual begin_generate, BEFORE the handoff cut.
+        witnesses["ticket"] = ticket_witness(kwargs["ticket"])
         if cut == "handoff":
-            acknowledge_and_die(sender, cut, marker)
+            acknowledge_and_die(sender, cut, marker, witnesses)
         return pending
     adapter.begin_generate = spy
     seams = {
         "permit": (context.policies, "permit_operation"),
         "fund": (context.ledger, "fund_plan"),
         "claim": (context.ledger, "begin_attempt"),
-        "stage": (context.policies, "stage_result"),
         "settle": (context.ledger, "settle"),
         "terminal": (context.policies, "mark_terminal"),
     }
@@ -99,7 +188,7 @@ def worker(spec, signer, request, authorization_hash, cut, marker, sends, sender
         original = getattr(owner, method)
         def after_commit(*args, **kwargs):
             original(*args, **kwargs)
-            acknowledge_and_die(sender, cut, marker)
+            acknowledge_and_die(sender, cut, marker, witnesses)
         setattr(owner, method, after_commit)
     try:
         asyncio.run(context.controller.complete_evaluation(
@@ -113,6 +202,11 @@ def worker(spec, signer, request, authorization_hash, cut, marker, sends, sender
 def prepare(root):
     source = Path(os.environ["M8_SOURCE_ROOT"])
     raw = json.loads((source / "fixtures/bootstrap/simulation.example.json").read_text())
+    price = next(item for item in raw["prices"]
+        if (item["provider"], item["model"]) == ("openai", "mock-openai-v1"))
+    assert tuple(Decimal(price[name]) for name in (
+        "input_usd_per_million", "output_usd_per_million", "fee_usd")) == (
+        Decimal(0), Decimal(1), Decimal(0))
     raw.update(runtime_root=str(root), authority_id="m8-r04-crash-" + uuid.uuid4().hex,
         created_utc=(T0 - timedelta(seconds=10)).isoformat(),
         deadline_utc=(T0 + timedelta(minutes=5)).isoformat(),
@@ -203,7 +297,7 @@ def test_single_operation_controller_crash_and_reopen(cut):
     root.mkdir(parents=True, exist_ok=False)
     old_root = os.environ.get("GATEWAY_RUNTIME_ROOT")
     os.environ["GATEWAY_RUNTIME_ROOT"] = str(root)
-    observations, child = [], None
+    observations, child, receipt = [], None, None
     receiver = sender = context = None
     started = time.monotonic()
     phase = "prepare"
@@ -224,8 +318,15 @@ def test_single_operation_controller_crash_and_reopen(cut):
         assert not child.is_alive(), "owned worker exceeded ten-second boundary"
         assert child.exitcode == EXIT_AT_CUT, "worker did not reach exact post-commit cut"
         assert receiver.poll(0.5), "missing exact post-commit acknowledgment"
-        receipt = json.loads(receiver.recv_bytes(maxlength=1024))
-        assert receipt == dict(cut=cut, pid=child.pid, marker=marker)
+        receipt = json.loads(receiver.recv_bytes(maxlength=ACK_MAX_BYTES))
+        expected_keys = {"cut", "pid", "marker"}
+        if cut in ("handoff", "stage", "settle", "terminal"):
+            expected_keys.add("ticket")
+        if cut in ("stage", "settle", "terminal"):
+            expected_keys.add("stage")
+        assert set(receipt) == expected_keys
+        assert {name: receipt[name] for name in ("cut", "pid", "marker")} == dict(
+            cut=cut, pid=child.pid, marker=marker)
         assert sends.value == (1 if cut in ("handoff", "stage", "settle", "terminal") else 0)
         clock = [0]
         phase = "reopen"
@@ -233,6 +334,12 @@ def test_single_operation_controller_crash_and_reopen(cut):
         forbid_send(context, sends)
         after_death, operation = observe(context, root, sends, "after-death", observations)
         micros = integer_micros(reserved)
+        if "ticket" in receipt:
+            assert receipt["ticket"] == committed_ticket_witness(context, operation)
+            assert after_death["claims"] == after_death["funded_operations"] == after_death["sends"] == 1
+        if "stage" in receipt:
+            assert operation.staged_result is not None
+            assert stage_witness(context, operation.staged_result) == receipt["stage"]
         assert after_death["claims"] == (0 if cut in ("permit", "fund") else 1)
         if cut == "permit":
             assert after_death["funded_operations"] == 0
@@ -242,8 +349,10 @@ def test_single_operation_controller_crash_and_reopen(cut):
             assert after_death["totals"]["future_usd"] == micros
         elif cut in ("claim", "handoff", "stage"):
             assert after_death["totals"]["active_usd"] == micros
+            assert after_death["totals"]["known_usd"] == after_death["totals"]["released_usd"] == 0
+            assert after_death["totals"]["unknown_usd"] == 0
         else:
-            assert after_death["totals"]["known_usd"] > 0
+            successful_totals(after_death["totals"], micros)
         if cut in ("permit", "fund", "claim", "handoff"):
             phase = "before-expiry-owner-exit"
             assert duplicate(context, request, authorization_hash).http_status == 202
@@ -280,16 +389,22 @@ def test_single_operation_controller_crash_and_reopen(cut):
             final, snapshot = observe(context, root, sends, "recovered-replay", observations)
             assert snapshot.state == OperationState.TERMINAL
             assert final["totals"]["active_usd"] == final["totals"]["future_usd"] == 0
-            assert final["totals"]["unknown_usd"] == 0
-            assert final["totals"]["known_usd"] + final["totals"]["released_usd"] == micros
-            replay_hash = digest(reply.result)
+            successful_totals(final["totals"], micros)
+            assert_original_replay(context, snapshot, reply, receipt["stage"])
             context.controller.recover(spec.authority_id, now=T0)
-            assert digest(duplicate(context, request, authorization_hash).result) == replay_hash
+            repeated_reply = duplicate(context, request, authorization_hash)
+            repeated, repeated_snapshot = observe(context, root, sends, "repeated-replay", observations)
+            successful_totals(repeated["totals"], micros)
+            assert_original_replay(context, repeated_snapshot, repeated_reply, receipt["stage"])
         final_before = observe(context, root, sends, "idempotence-before", observations)[0]
         phase = "repeat-recovery-and-duplicate"
         context.controller.recover(spec.authority_id, now=T0 + timedelta(seconds=clock[0]))
-        duplicate(context, request, authorization_hash)
-        final_after = observe(context, root, sends, "idempotence-after", observations)[0]
+        repeated_reply = duplicate(context, request, authorization_hash)
+        final_after, repeated_snapshot = observe(context, root, sends, "idempotence-after", observations)
+        if cut in ("stage", "settle", "terminal"):
+            successful_totals(final_before["totals"], micros)
+            successful_totals(final_after["totals"], micros)
+            assert_original_replay(context, repeated_snapshot, repeated_reply, receipt["stage"])
         assert {key: value for key, value in final_before.items() if key != "phase"} == {
             key: value for key, value in final_after.items() if key != "phase"}
         assert sends.value == (1 if cut in ("handoff", "stage", "settle", "terminal") else 0)
@@ -315,5 +430,5 @@ def test_single_operation_controller_crash_and_reopen(cut):
             "source_file_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
             "clock": "synthetic T0 plus coherent UTC/monotonic61s advance",
             "completed": completed, "last_phase": phase,
-            "observations": observations, "worker_exit": None if child is None else child.exitcode,
+            "cut_witness": receipt, "observations": observations, "worker_exit": None if child is None else child.exitcode,
             "limits": "single eval-purpose operation; owner identity gap remains open"}, indent=2), encoding="utf-8")
