@@ -12,7 +12,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--junit", type=Path)
     parser.add_argument("--source-root", type=Path)
-    args, extra = parser.parse_known_args()
+    parser.add_argument("-k", "--keyword")
+    parser.add_argument("-q", "--quiet", action="store_true")
+    parser.add_argument("--tb", choices=("auto", "long", "short", "line", "native", "no"), default="short")
+    parser.add_argument("--collect-only", action="store_true")
+    args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     source = args.source_root.resolve(strict=True) if args.source_root else root
     environment = os.environ.copy()
@@ -21,10 +25,23 @@ def main():
     source_commit = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
     test_commit = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
     print(f"M8_SOURCE_ROOT={source}; source_commit={source_commit}; test_commit={test_commit}", flush=True)
-    command = [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-v", str(root / "tests")]
+    # Routine CI never collects grant-bound CLI/expiry/Docker execution. Do not
+    # forward arbitrary pytest paths/options that can broaden this selection.
+    test_root = root / "tests"
+    held = {"test_cli_journey.py", "test_cli_expiry.py"}
+    selected = sorted(path for path in test_root.glob("test_*.py") if path.name not in held)
+    selected.extend(sorted((test_root / "eval").glob("test_*.py")))
+    if not selected:
+        parser.error("No routine tests found")
+    command = [sys.executable, "-B", "-m", "pytest", "-p", "no:cacheprovider",
+               "-q" if args.quiet else "-v", "--tb=" + args.tb, *map(str, selected)]
+    if args.keyword:
+        command.extend(("-k", args.keyword))
+    if args.collect_only:
+        command.append("--collect-only")
     if args.junit:
         command.append("--junitxml=" + str(args.junit.resolve()))
-    return subprocess.call(command + extra, env=environment)
+    return subprocess.call(command, env=environment)
 
 
 if __name__ == "__main__":
