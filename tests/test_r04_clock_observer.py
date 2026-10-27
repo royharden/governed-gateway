@@ -81,6 +81,20 @@ def test_spawn_thread_failure_cleans_exact_returned_handle(bounds, monkeypatch):
     assert process.stdout.closed and process.stderr.closed
 
 
+def test_capture_construction_failure_cleans_exact_returned_handle(bounds, monkeypatch):
+    # what_bug_this_catches: Capture/Thread construction can fail after Popen
+    # returns, before the caller owns the handle. Cleanup must cover this gap.
+    process = SimpleNamespace(stdout=io.BytesIO(), stderr=io.BytesIO(),
+                              poll=Mock(return_value=None), kill=Mock(), wait=Mock())
+    monkeypatch.setattr(bounds.subprocess, "Popen", Mock(return_value=process))
+    monkeypatch.setattr(bounds, "Capture", Mock(side_effect=RuntimeError("capture unavailable")))
+    with pytest.raises(RuntimeError, match="capture unavailable"):
+        bounds.spawn(["synthetic-never-executed"], stdout_cap=5, stderr_cap=5)
+    process.kill.assert_called_once_with()
+    process.wait.assert_called_once_with(timeout=1)
+    assert process.stdout.closed and process.stderr.closed
+
+
 @pytest.mark.parametrize("cause", ["timeout", "capture", "exit", "cleanup"])
 def test_control_failure_always_finishes_owned_handle(bounds, monkeypatch, cause):
     # what_bug_this_catches: timeout/capture/cleanup/nonzero exit reported as
