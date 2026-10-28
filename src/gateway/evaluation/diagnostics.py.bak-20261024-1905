@@ -1,0 +1,111 @@
+"""Pure body-free acquisition coverage and quality-only statistical disclosures."""
+from __future__ import annotations
+
+from collections.abc import Mapping
+from decimal import Decimal
+
+from gateway.schemas.core import money_from_micros, usd_micros
+from gateway.schemas.operator import AcquisitionReceipt, PairedDifference
+
+from .dataset import DevelopmentTask
+
+
+FAMILIES = ("extraction", "evidence_qa", "transformation")
+ROUTES = ("B0", "B1", "C", "s3_offline")
+OUTCOMES = ("ok", "refused", "truncated", "provider_error", "cancelled", "timeout", "missing")
+
+
+def is_observed(receipt: AcquisitionReceipt | None) -> bool:
+    return receipt is not None and receipt.outcome_status != "missing" and (
+        receipt.outcome_status != "ok" or receipt.response_text is not None)
+
+
+def is_success(task: DevelopmentTask, receipt: AcquisitionReceipt | None) -> int:
+    return int(is_observed(receipt) and receipt.outcome_status == "ok"
+               and task.success(receipt.response_text))
+
+
+def _cost_coverage(values: tuple[Decimal | None, ...]) -> dict:
+    known = tuple(value for value in values if value is not None)
+    units = sum(usd_micros(value) for value in known)
+    return {"eligible_count": len(values), "known_count": len(known),
+            "unknown_count": len(values) - len(known),
+            "known_sum_usd": money_from_micros(units) if known else None,
+            "total_usd": money_from_micros(units) if values and len(known) == len(values) else None}
+
+
+def _summary(route: str, family: str | None,
+             items: tuple[tuple[DevelopmentTask, AcquisitionReceipt | None], ...],
+             reuse_sources: Mapping[str, AcquisitionReceipt]) -> dict:
+    receipts = tuple(receipt for _, receipt in items if receipt is not None)
+    reused = tuple(receipt for receipt in receipts if receipt.reused)
+    observed = sum(is_observed(receipt) for _, receipt in items)
+    successes = sum(is_success(task, receipt) for task, receipt in items)
+    statuses = {status: sum(receipt.outcome_status == status for receipt in receipts)
+                for status in OUTCOMES}
+    absent = len(items) - len(receipts)
+    source_hashes = {receipt.reuse_source_sha256 for receipt in reused}
+    return {
+        "route": route, "family": family, "assigned_count": len(items),
+        "receipt_count": len(receipts), "observed_count": observed,
+        "success_count": successes, "scoring_failure_count": observed - successes,
+        "terminal_failure_count": sum(statuses[status] for status in OUTCOMES
+                                      if status not in ("ok", "missing")),
+        "missing_receipt_count": absent, "missing_observation_count": len(items) - observed,
+        "unknown_outcome_count": len(items) - observed,
+        "unscorable_ok_count": sum(receipt.outcome_status == "ok" and receipt.response_text is None
+                                   for receipt in receipts),
+        "outcome_counts": statuses, "reused_receipt_count": len(reused),
+        "original_receipt_count": len(receipts) - len(reused),
+        "attempted_call_count_known_subtotal": sum(receipt.attempt_count for receipt in receipts
+                                                   if not receipt.reused),
+        "attempted_call_count_unknown_slots": absent,
+        "reuse_attempt_count": sum(receipt.attempt_count for receipt in reused),
+        "historical_source_attempt_count": sum(reuse_sources[key].attempt_count for key in source_hashes),
+        "original_acquisition_cost": _cost_coverage(tuple(
+            None if receipt is None else receipt.original_acquisition_cost_usd for _, receipt in items)),
+        "current_reuse_cost": _cost_coverage(tuple(receipt.current_reuse_cost_usd for receipt in reused)),
+        "current_reuse_not_applicable_count": len(receipts) - len(reused),
+        "current_input_cost": _cost_coverage(tuple(None if receipt is None else
+            receipt.current_reuse_cost_usd if receipt.reused else receipt.original_acquisition_cost_usd
+            for _, receipt in items)),
+        "retained_liability_known_sum_usd": money_from_micros(sum(
+            usd_micros(receipt.retained_liability_usd) for receipt in receipts)),
+        "retained_liability_unknown_slots": absent,
+    }
+
+
+def build_diagnostics(*, report_id: str, spec_sha256: str, corpus_sha256: str,
+                      authorization_sha256: str, authority_evidence_sha256: str | None,
+                      candidate_policy_sha256: str,
+                      authority_violation_count: int | None, authority_established: bool,
+                      acquisition_items: tuple[tuple[DevelopmentTask, AcquisitionReceipt | None], ...],
+                      route_items: Mapping[str, tuple[tuple[DevelopmentTask, AcquisitionReceipt | None], ...]],
+                      pairs: tuple[PairedDifference, ...],
+                      reuse_sources: Mapping[str, AcquisitionReceipt]) -> dict:
+    """Emit only identifiers, bounded classifications, counts, money and intervals.
+
+    Receipt bodies/references, task text/labels, provider error text and credentials
+    are never copied. Route rows reuse the same observations and are not new spend.
+    An absent input slot has unknown attempts/cost; its subtotal is never a total.
+    """
+    return {
+        "schema_version": 1, "kind": "development_evaluation_diagnostics",
+        "report_id": report_id, "evaluation_spec_sha256": spec_sha256,
+        "corpus_manifest_sha256": corpus_sha256, "authorization_sha256": authorization_sha256,
+        "mode": "simulation", "synthetic": True, "interpretation": "statistical_only",
+        "authority_status": "authority_evidence_recorded" if authority_established else "authority_not_established",
+        "authority_invariant_evidence_sha256": authority_evidence_sha256,
+        "authority_violation_count": authority_violation_count,
+        "authority_binding": {"candidate_policy_sha256": candidate_policy_sha256,
+                              "scope": "supplied_authority_invariant_evidence",
+                              "scope_verification": "upstream_scope_verification_required"},
+        "promotion_status": "not_established",
+        "call_count_semantics": "input_receipt_attempts_known_subtotal",
+        "offline_semantics": "same_candidate_selector_zero_acquisitions",
+        "acquisition_summary": _summary("acquisition_input", None, acquisition_items, reuse_sources),
+        "route_summaries": tuple(_summary(route, family, tuple(item for item in route_items[route]
+                                   if family is None or item[0].family == family), reuse_sources)
+                                 for route in ROUTES for family in (*FAMILIES, None)),
+        "paired_statistical_differences": pairs,
+    }

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "mode": "simulation",
+  "runtime_root": "C:\\agent-runtime\\governed-gateway\\simulation-example",
+  "authority_id": "explicit-simulation-example-20261024",
+  "created_utc": "2026-10-24T00:00:00.000000Z",
+  "deadline_utc": "2026-10-26T00:00:00.000000Z",
+  "cap_usd": "0.004500",
+  "max_outbound_attempts": 256,
+  "caller_id": "local-synthetic-demo",
+  "development_directory": "fixtures/tasks/dev",
+  "prices": [
+    {"provider": "openai", "model": "mock-openai-v1", "input_usd_per_million": "0", "output_usd_per_million": "1", "fee_usd": "0"},
+    {"provider": "anthropic", "model": "mock-anthropic-v1", "input_usd_per_million": "0", "output_usd_per_million": "2", "fee_usd": "0"}
+  ],
+  "bootstrap_seed": 1729,
+  "serving_max_attempts": 2,
+  "acquisition_max_attempts": 1,
+  "plans": {
+    "baseline": {"fallback_target": "B0", "boundary_target": "B1", "boundary_output_tokens_gt": 512},
+    "candidate": {"fallback_target": "B1"}
+  },
+  "clock_max_drift_microseconds": 2000000,
+  "clock_max_startup_advance_seconds": 172800,
+  "original": {
+    "idempotency_key": "explicit-demo-original",
+    "body": {"model": "default", "messages": [{"role": "user", "content": "Return a synthetic demonstration response."}], "max_completion_tokens": 128, "stream": false, "n": 1}
+  },
+  "boundary": {
+    "idempotency_key": "explicit-demo-boundary",
+    "body": {"model": "default", "messages": [{"role": "user", "content": "Return a synthetic demonstration response."}], "max_completion_tokens": 1024, "stream": false, "n": 1}
+  }
+}

@@ -1,0 +1,160 @@
+"""Payload-free development evaluation serialization and human rendering."""
+from __future__ import annotations
+
+from typing import TextIO
+
+from gateway.schemas.core import canonical_bytes
+from gateway.schemas.operator import EvaluationReport
+
+from .artifacts import EvaluationArtifacts, report_bundle_json, validate_artifacts
+from .diagnostics import OUTCOMES
+
+
+def evaluation_json(report: EvaluationReport, *, artifacts: EvaluationArtifacts | None = None) -> str:
+    """Visible validated ancillary facts, or an explicit unavailable disclosure."""
+    if artifacts is not None:
+        return report_bundle_json(report, artifacts)
+    return canonical_bytes({"report": report, "artifacts": None,
+                            "diagnostics_status": "unavailable"}).decode("utf-8") + "\n"
+
+
+def _show(value) -> str:
+    return "unavailable" if value is None else str(value)
+
+
+def render_evaluation(report: EvaluationReport, *, output: TextIO,
+                      artifacts: EvaluationArtifacts | None = None) -> None:
+    # Validate before writing anything: an invalid join never looks like a partial
+    # successful report. Validation does not authenticate invariant execution.
+    diagnostics = None if artifacts is None else validate_artifacts(report, artifacts)
+    output.write("# Development evaluation\n\n")
+    output.write("SIMULATION: synthetic development outcomes; runtime unverified. "
+                 "This report does not authorize promotion or real serving.\n\n")
+    output.write(f"Report `{report.report_id}`: {report.status}; compatibility "
+                 f"{report.compatibility_status}; benefit {report.benefit_status}.\n\n")
+    output.write("Report status describes compatibility, including supplied upstream authority evidence. "
+                 "A compatibility pass can support evaluated baseline registration; unmeasured benefit "
+                 "does not establish a promotion benefit or authorize approval/activation.\n\n")
+    output.write(f"Tasks: {report.task_count}; acquisition attempts on non-reused input receipts: {report.attempt_count}; "
+                 f"missing observations across both static targets: {report.missing_observation_count}.\n\n")
+    output.write("Wilson95 intervals use the assigned denominator. Observed-only rates are separate. "
+                 "Family sizes are equal, so overall task weighting equals equal family weighting.\n\n")
+    output.write("| Route | Family | Success/assigned | Observed | Assigned rate | Observed rate | Wilson95 |\n"
+                 "|---|---|---:|---:|---:|---:|---|\n")
+    for row in report.route_rows:
+        s = row.success
+        output.write(f"| {row.route} | {row.family or 'overall'} | {s.success_count}/{s.assigned_count} | "
+                     f"{s.observed_count}/{s.assigned_count} | {_show(s.assigned_rate)} | "
+                     f"{_show(s.observed_rate)} | {_show(s.wilson95_lower)} to {_show(s.wilson95_upper)} |\n")
+    output.write("\nCosts and latency below describe synthetic source acquisitions, including original "
+                 "outcome cost for reused responses. Offline selection adds zero calls. "
+                 "Repeated route rows share observations and must not be summed as new spend. "
+                 "Separate original/current reuse totals appear in validated ancillary diagnostics below. "
+                 "Known row costs equal original acquisition costs; unknown originals remain unknown. "
+                 "An original receipt has no current reuse cost; a reused receipt must preserve its "
+                 "immutable original evidence, report zero new attempts and explicit zero replay cost. "
+                 "Historical attempts belonging to reuse sources are not new attempts in this input.\n\n")
+    output.write("| Route | Family | Cost known/assigned | Known cost USD | Total USD | USD/success | "
+                 "Retained known USD | Latency n | p50/p95 ms | Missing |\n"
+                 "|---|---|---:|---:|---:|---:|---:|---:|---|---|\n")
+    for row in report.route_rows:
+        output.write(f"| {row.route} | {row.family or 'overall'} | {row.cost_known_count}/{row.success.assigned_count} | "
+                     f"{_show(row.known_cost_sum_usd)} | {_show(row.total_cost_usd)} | "
+                     f"{_show(row.cost_per_success_usd)} | {row.retained_liability_usd} | "
+                     f"{row.latency_sample_count} | {_show(row.latency_p50_ms)}/{_show(row.latency_p95_ms)} | "
+                     f"{', '.join(row.incomplete_reasons) or 'none'} |\n")
+    output.write("\nLatency uses nearest rank and is synthetic source latency, never measured gateway overhead. "
+                 "Retained liability is only a known subtotal when a receipt is missing; its unknown "
+                 "part is unavailable. Zero successes or incomplete costs leave USD/success unavailable.\n\n")
+    output.write("C-minus-B0 uses task-paired bootstrap95, 10000 resamples and the frozen seed; "
+                 "small development families have limited power. Missing pairs yield no interval.\n\n")
+    output.write("| Family | Pairs | Missing pairs | Difference | Bootstrap95 | Finding | Seed |\n"
+                 "|---|---:|---:|---:|---|---|---:|\n")
+    pairs = diagnostics["paired_statistical_differences"] if diagnostics is not None else [
+        pair.model_dump(mode="python") for pair in report.paired_differences]
+    for pair in pairs:
+        output.write(f"| {pair['family']} | {pair['paired_count']} | {pair['missing_pair_count']} | {_show(pair['point'])} | "
+                     f"{_show(pair['lower95'])} to {_show(pair['upper95'])} | {pair['noninferiority']} | {pair['seed']} |\n")
+    if diagnostics is not None:
+        output.write(f"\nAncillary paired findings: `{diagnostics['interpretation']}`; "
+                     f"`{diagnostics['authority_status']}`; promotion `{diagnostics['promotion_status']}`. "
+                     "All three family rows are shown, including favorable quality-only intervals that "
+                     "cannot appear as shared report findings without authority evidence. These "
+                     "classifications describe statistics and do not establish authority or promotion.\n\n")
+        output.write("Each paired row uses paired_task_bootstrap95 with 10000 resamples. "
+                     "Missing pairs remain in the assigned denominator and have null point/interval.\n\n")
+        _render_diagnostics(diagnostics, output=output)
+    else:
+        output.write("\nAncillary diagnostics unavailable: original/current reuse cost coverage, "
+                     "call/status/failure/unknown summaries and any omitted statistical-only intervals "
+                     "cannot be recovered from this report alone. Supply its exact frozen artifact bundle.\n\n")
+    output.write("\n`s3_offline` replays the same deterministic candidate selection and exact outcome table; "
+                 "it is not real S3 execution or an end-to-end performance measurement.\n\n")
+    output.write(f"Supplied invariant evidence: {_show(report.authority_invariant_evidence_sha256)}; "
+                 f"violations: {_show(report.authority_violation_count)}.\n\n")
+    output.write(f"Incomplete: {', '.join(report.incomplete_reasons) or 'none'}.\n\n")
+    output.write(f"Frozen: {report.frozen_utc.isoformat()}; expires: {report.expires_utc.isoformat()}.\n\n")
+    output.write("Expiry is capped by the earliest admitted original acquisition freshness deadline, "
+                 "including original sources of reused outcomes; replay does not renew evidence.\n\n")
+    output.write(f"Spec `{report.evaluation_spec_sha256}`; corpus `{report.corpus_manifest_sha256}`; "
+                 f"artifacts `{report.artifact_manifest_sha256}`.\n")
+
+
+def _cost(value: dict) -> str:
+    return (f"{value['known_count']}/{value['eligible_count']}; unknown {value['unknown_count']}; "
+            f"known subtotal {_show(value['known_sum_usd'])}; total {_show(value['total_usd'])}")
+
+
+def _label(summary: dict) -> str:
+    return f"{summary['route']} / {summary['family'] or 'overall'}"
+
+
+def _render_diagnostics(diagnostics: dict, *, output: TextIO) -> None:
+    output.write("Ancillary coverage is frozen under the report artifact manifest. "
+                 "acquisition_input counts the two static-target input slots once; C and s3_offline "
+                 "reuse those observations and add zero acquisitions. Repeated route/family rows "
+                 "must not be summed as spend. A missing receipt has unknown calls and liability. "
+                 "Attempt counts are known input subtotals; historical source attempts are separate.\n\n")
+    binding = diagnostics["authority_binding"]
+    output.write(f"Invariant binding: candidate `{binding['candidate_policy_sha256']}`; "
+                 f"scope `{binding['scope']}`; `{binding['scope_verification']}`. "
+                 "The upstream collector must bind actual scope and this candidate in its hashed "
+                 "evidence record. This scorer verifies identity joins, not execution, independence "
+                 "or full acceptance coverage.\n\n")
+    summaries = [diagnostics["acquisition_summary"], *diagnostics["route_summaries"]]
+    output.write("| Route / family | Assigned | Receipts | Observed | Success | Scoring failures | "
+                 "Terminal failures | Missing receipts | Missing observations | Unknown outcomes | "
+                 "Unscorable OK | Original / reused |\n"
+                 "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
+    for row in summaries:
+        output.write(f"| {_label(row)} | {row['assigned_count']} | {row['receipt_count']} | {row['observed_count']} | "
+                     f"{row['success_count']} | {row['scoring_failure_count']} | {row['terminal_failure_count']} | "
+                     f"{row['missing_receipt_count']} | {row['missing_observation_count']} | {row['unknown_outcome_count']} | "
+                     f"{row['unscorable_ok_count']} | {row['original_receipt_count']} / {row['reused_receipt_count']} |\n")
+    output.write("\nOutcome counts describe input receipt outcomes, not separate provider attempts. "
+                 "Terminal failure counts include refusal, truncation, provider error, cancellation and "
+                 "timeout; scoring failures also include observed incorrect OK responses.\n\n")
+    output.write("| Route / family | " + " | ".join(OUTCOMES) + " |\n"
+                 "|---|" + "---:|" * len(OUTCOMES) + "\n")
+    for row in summaries:
+        output.write(f"| {_label(row)} | " + " | ".join(str(row["outcome_counts"][key]) for key in OUTCOMES) + " |\n")
+    output.write("\n| Route / family | New attempted calls known subtotal | Unknown call slots | Reuse attempts | "
+                 "Historical source attempts | Reuse N/A receipts | Unknown liability slots |\n"
+                 "|---|---:|---:|---:|---:|---:|---:|\n")
+    for row in summaries:
+        output.write(f"| {_label(row)} | {row['attempted_call_count_known_subtotal']} | "
+                     f"{row['attempted_call_count_unknown_slots']} | {row['reuse_attempt_count']} | "
+                     f"{row['historical_source_attempt_count']} | {row['current_reuse_not_applicable_count']} | "
+                     f"{row['retained_liability_unknown_slots']} |\n")
+    output.write("\nOriginal acquisition costs are historical even for reused outcomes. Current reuse "
+                 "costs apply only to reused receipts; originals are N/A. Current input cost uses "
+                 "original cost for new inputs and reuse cost for reused inputs. No applicable receipts "
+                 "means unavailable cost; unknown values are never zero. All costs below are synthetic USD.\n\n")
+    output.write("| Route / family | Original cost known/eligible, coverage and USD | "
+                 "Current reuse known/eligible, coverage and USD | Current input known/eligible, coverage and USD | "
+                 "Known retained liability USD |\n|---|---|---|---|---:|\n")
+    for row in summaries:
+        output.write(f"| {_label(row)} | {_cost(row['original_acquisition_cost'])} | "
+                     f"{_cost(row['current_reuse_cost'])} | {_cost(row['current_input_cost'])} | "
+                     f"{row['retained_liability_known_sum_usd']} |\n")
+    output.write("\n")

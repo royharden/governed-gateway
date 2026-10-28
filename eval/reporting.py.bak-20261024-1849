@@ -1,0 +1,79 @@
+"""Payload-free development evaluation serialization and human rendering."""
+from __future__ import annotations
+
+from typing import TextIO
+
+from gateway.schemas.core import canonical_bytes
+from gateway.schemas.operator import EvaluationReport
+
+
+def evaluation_json(report: EvaluationReport) -> str:
+    """Only shared report fields; acquisition content is never accepted here."""
+    return canonical_bytes(report).decode("utf-8") + "\n"
+
+
+def _show(value) -> str:
+    return "unavailable" if value is None else str(value)
+
+
+def render_evaluation(report: EvaluationReport, *, output: TextIO) -> None:
+    output.write("# Development evaluation\n\n")
+    output.write("SIMULATION: synthetic development outcomes; runtime unverified. "
+                 "This report does not authorize promotion or real serving.\n\n")
+    output.write(f"Report `{report.report_id}`: {report.status}; compatibility "
+                 f"{report.compatibility_status}; benefit {report.benefit_status}.\n\n")
+    output.write("Report status describes compatibility, including independent authority evidence. "
+                 "A compatibility pass can support evaluated baseline registration; unmeasured benefit "
+                 "does not establish a promotion benefit or authorize approval/activation.\n\n")
+    output.write(f"Tasks: {report.task_count}; acquisition attempts on non-reused input receipts: {report.attempt_count}; "
+                 f"missing observations across both static targets: {report.missing_observation_count}.\n\n")
+    output.write("Wilson95 intervals use the assigned denominator. Observed-only rates are separate. "
+                 "Family sizes are equal, so overall task weighting equals equal family weighting.\n\n")
+    output.write("| Route | Family | Success/assigned | Observed | Assigned rate | Observed rate | Wilson95 |\n"
+                 "|---|---|---:|---:|---:|---:|---|\n")
+    for row in report.route_rows:
+        s = row.success
+        output.write(f"| {row.route} | {row.family or 'overall'} | {s.success_count}/{s.assigned_count} | "
+                     f"{s.observed_count}/{s.assigned_count} | {_show(s.assigned_rate)} | "
+                     f"{_show(s.observed_rate)} | {_show(s.wilson95_lower)} to {_show(s.wilson95_upper)} |\n")
+    output.write("\nCosts and latency below describe synthetic source acquisitions, including original "
+                 "outcome cost for reused responses. Offline selection adds zero calls. "
+                 "Repeated route rows share observations and must not be summed as new spend. "
+                 "The shared row schema does not expose separate original/current reuse totals. "
+                 "Known row costs equal original acquisition costs; unknown originals remain unknown. "
+                 "An original receipt has no current reuse cost; a reused receipt must preserve its "
+                 "immutable original evidence, report zero new attempts and explicit zero replay cost. "
+                 "Historical attempts belonging to reuse sources are not new attempts in this input.\n\n")
+    output.write("| Route | Family | Cost known/assigned | Known cost USD | Total USD | USD/success | "
+                 "Retained known USD | Latency n | p50/p95 ms | Missing |\n"
+                 "|---|---|---:|---:|---:|---:|---:|---:|---|---|\n")
+    for row in report.route_rows:
+        output.write(f"| {row.route} | {row.family or 'overall'} | {row.cost_known_count}/{row.success.assigned_count} | "
+                     f"{_show(row.known_cost_sum_usd)} | {_show(row.total_cost_usd)} | "
+                     f"{_show(row.cost_per_success_usd)} | {row.retained_liability_usd} | "
+                     f"{row.latency_sample_count} | {_show(row.latency_p50_ms)}/{_show(row.latency_p95_ms)} | "
+                     f"{', '.join(row.incomplete_reasons) or 'none'} |\n")
+    output.write("\nLatency uses nearest rank and is synthetic source latency, never measured gateway overhead. "
+                 "Retained liability is only a known subtotal when a receipt is missing; its unknown "
+                 "part is unavailable. Zero successes or incomplete costs leave USD/success unavailable.\n\n")
+    output.write("C-minus-B0 uses task-paired bootstrap95, 10000 resamples and the frozen seed; "
+                 "small development families have limited power. Missing pairs yield no interval.\n\n")
+    output.write("| Family | Pairs | Missing pairs | Difference | Bootstrap95 | Finding | Seed |\n"
+                 "|---|---:|---:|---:|---|---|---:|\n")
+    for pair in report.paired_differences:
+        output.write(f"| {pair.family} | {pair.paired_count} | {pair.missing_pair_count} | {_show(pair.point)} | "
+                     f"{_show(pair.lower95)} to {_show(pair.upper95)} | {pair.noninferiority} | {pair.seed} |\n")
+    if len(report.paired_differences) < 3:
+        output.write("\nSome favorable quality intervals cannot be represented by the current shared schema "
+                     "without complete independent authority evidence. Those rows are omitted; no "
+                     "noninferiority or invariant pass is asserted. Shared schema reconciliation is pending.\n")
+    output.write("\n`s3_offline` replays the same deterministic candidate selection and exact outcome table; "
+                 "it is not real S3 execution or an end-to-end performance measurement.\n\n")
+    output.write(f"Independent invariant evidence: {_show(report.authority_invariant_evidence_sha256)}; "
+                 f"violations: {_show(report.authority_violation_count)}.\n\n")
+    output.write(f"Incomplete: {', '.join(report.incomplete_reasons) or 'none'}.\n\n")
+    output.write(f"Frozen: {report.frozen_utc.isoformat()}; expires: {report.expires_utc.isoformat()}.\n\n")
+    output.write("Expiry is capped by the earliest admitted original acquisition freshness deadline, "
+                 "including original sources of reused outcomes; replay does not renew evidence.\n\n")
+    output.write(f"Spec `{report.evaluation_spec_sha256}`; corpus `{report.corpus_manifest_sha256}`; "
+                 f"artifacts `{report.artifact_manifest_sha256}`.\n")

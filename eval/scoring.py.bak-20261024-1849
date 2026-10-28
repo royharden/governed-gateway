@@ -1,0 +1,320 @@
+"""Pure synthetic-development replay. This module cannot acquire or approve outcomes."""
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping, Sequence
+from datetime import datetime, timedelta
+from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR, localcontext
+from math import ceil, sqrt
+from random import Random
+
+from gateway.schemas.core import ErrorCode, GatewayError, digest, money_from_micros, usd_micros
+from gateway.schemas.governance import EvaluationAuthorization, EvidenceTuple, PolicyBundle
+from gateway.schemas.operator import (
+    AcquisitionReceipt, CorpusManifest, EvaluationReport, EvaluationSpec,
+    PairedDifference, RouteEvaluation, SuccessEstimate,
+)
+from gateway.schemas.requests import RequestFeatures
+
+from .dataset import DevelopmentTask
+
+
+FAMILIES = ("extraction", "evidence_qa", "transformation")
+_IDENTITY_FIELDS = ("exact_model", "profile_sha256", "adapter_sha256", "price_sha256", "bound_sha256")
+_MICRO = Decimal("0.000001")
+
+
+def _number(numerator: int, denominator: int, *, rounding=ROUND_FLOOR) -> Decimal:
+    with localcontext() as context:
+        context.prec = 50
+        return (Decimal(numerator) / Decimal(denominator)).quantize(_MICRO, rounding=rounding)
+
+
+def _wilson(successes: int, assigned: int) -> tuple[Decimal | None, Decimal | None]:
+    """Wilson95 uses the conservative assigned denominator; missing is not success."""
+    if not assigned:
+        return None, None
+    z = 1.959963984540054
+    p = successes / assigned
+    scale = 1 + z * z / assigned
+    center = (p + z * z / (2 * assigned)) / scale
+    radius = z * sqrt(p * (1 - p) / assigned + z * z / (4 * assigned * assigned)) / scale
+    low = Decimal(str(max(0.0, center - radius))).quantize(_MICRO, rounding=ROUND_FLOOR)
+    high = Decimal(str(min(1.0, center + radius))).quantize(_MICRO, rounding=ROUND_CEILING)
+    return low, high
+
+
+def _observed(receipt: AcquisitionReceipt | None) -> bool:
+    # A recorded terminal failure is observed, but ok without content is unscorable.
+    return receipt is not None and receipt.outcome_status != "missing" and (
+        receipt.outcome_status != "ok" or receipt.response_text is not None)
+
+
+def _success(task: DevelopmentTask, receipt: AcquisitionReceipt | None) -> int:
+    return int(_observed(receipt) and receipt.outcome_status == "ok" and task.success(receipt.response_text))
+
+
+def _route_row(route: str, family: str | None,
+               items: tuple[tuple[DevelopmentTask, AcquisitionReceipt | None], ...]) -> RouteEvaluation:
+    assigned = len(items)
+    observed = sum(_observed(receipt) for _, receipt in items)
+    successes = sum(_success(task, receipt) for task, receipt in items)
+    costs = [receipt.known_cost_usd for _, receipt in items
+             if receipt is not None and receipt.known_cost_usd is not None]
+    latencies = sorted(receipt.latency_ms for _, receipt in items
+                       if _observed(receipt) and receipt.latency_ms is not None)
+    cost_units = sum(usd_micros(cost) for cost in costs)
+    complete_cost = len(costs) == assigned
+    reasons = []
+    if observed != assigned:
+        reasons.append("missing_observation")
+    if not complete_cost:
+        reasons.append("missing_cost")
+    if len(latencies) != assigned:
+        reasons.append("missing_latency")
+    if any(receipt is None for _, receipt in items):
+        reasons.append("missing_bound")  # Retained liability below is only a known subtotal.
+    low, high = _wilson(successes, assigned)
+    return RouteEvaluation(
+        route=route, family=family,
+        success=SuccessEstimate(assigned_count=assigned, observed_count=observed,
+                                success_count=successes,
+                                assigned_rate=_number(successes, assigned) if assigned else None,
+                                observed_rate=_number(successes, observed) if observed else None,
+                                wilson95_lower=low, wilson95_upper=high),
+        cost_known_count=len(costs),
+        known_cost_sum_usd=money_from_micros(cost_units) if costs else None,
+        total_cost_usd=money_from_micros(cost_units) if complete_cost else None,
+        cost_per_success_usd=money_from_micros((cost_units + successes - 1) // successes)
+        if complete_cost and successes else None,
+        retained_liability_usd=money_from_micros(sum(usd_micros(receipt.retained_liability_usd)
+                                                     for _, receipt in items if receipt is not None)),
+        latency_sample_count=len(latencies),
+        latency_p50_ms=latencies[ceil(len(latencies) * .50) - 1] if latencies else None,
+        latency_p95_ms=latencies[ceil(len(latencies) * .95) - 1] if latencies else None,
+        incomplete_reasons=tuple(reasons),
+    )
+
+
+def _paired(family: str, items, seed: int) -> PairedDifference:
+    differences = [_success(task, candidate) - _success(task, baseline)
+                   for task, candidate, baseline in items if _observed(candidate) and _observed(baseline)]
+    missing = len(items) - len(differences)
+    if missing or not differences:
+        return PairedDifference(family=family, paired_count=len(differences), missing_pair_count=missing,
+                                point=None, lower95=None, upper95=None, seed=seed,
+                                noninferiority="incomplete")
+    rng = Random(seed)
+    n = len(differences)
+    samples = sorted(sum(differences[rng.randrange(n)] for _ in range(n)) for _ in range(10000))
+    lower = _number(samples[249], n)
+    upper = _number(samples[9749], n, rounding=ROUND_CEILING)
+    decision = "noninferior" if lower >= Decimal("-0.05") else "regression" if upper < Decimal("-0.05") else "inconclusive"
+    return PairedDifference(family=family, paired_count=n, missing_pair_count=0,
+                            point=_number(sum(differences), n), lower95=lower, upper95=upper,
+                            seed=seed, noninferiority=decision)
+
+
+class EvalRunner:
+    """Composition injects exact registered identities; no caller boolean grants trust.
+
+    provenance_expectations maps each target to the five named identity fields above.
+    profile_sha256 is that policy target's capability_sha256, not the composite
+    adapter_capability_sha256 in the signed tuple. The trusted upstream registry
+    verifies that composite and target membership under INT-SEAMS-004.
+    verify_authorization must return the digest registered by upstream governance or
+    raise a closed error. verified_spec_sha256 is upstream registration's exact digest.
+    Reuse sources are immutable original receipts indexed by canonical receipt digest.
+    Candidate and s3_offline both replay the same selector/outcome table; the latter
+    is explicitly an offline reproduction, never an additional acquisition/runtime.
+    """
+
+    def __init__(self, *, tasks: tuple[DevelopmentTask, ...], baseline_target_id: str,
+                 second_target_id: str, candidate: PolicyBundle,
+                 provenance_expectations: Mapping[str, Mapping[str, str]],
+                 selector: Callable[[RequestFeatures, PolicyBundle], str],
+                 authorization: EvaluationAuthorization,
+                 verify_authorization: Callable[[EvaluationAuthorization], str],
+                 verified_spec_sha256: str | None, evaluator_code_sha256: str,
+                 frozen_utc: datetime, report_id: str,
+                 reuse_sources: Mapping[str, AcquisitionReceipt] | None = None,
+                 authority_invariant_evidence_sha256: str | None = None,
+                 authority_violation_count: int | None = None) -> None:
+        self._tasks = tuple(sorted(tasks, key=lambda task: task.task_id))
+        self._baseline = baseline_target_id
+        self._second = second_target_id
+        self._candidate = candidate
+        self._expectations = {key: dict(value) for key, value in provenance_expectations.items()}
+        self._selector = selector
+        self._authorization = authorization
+        self._verify_authorization = verify_authorization
+        self._verified_spec = verified_spec_sha256
+        self._evaluator_code = evaluator_code_sha256
+        self._now = frozen_utc
+        self._report_id = report_id
+        self._sources = dict(reuse_sources or {})
+        self._invariant_hash = authority_invariant_evidence_sha256
+        self._violations = authority_violation_count
+        target_ids = {target.target_id for target in candidate.targets}
+        if (baseline_target_id == second_target_id or target_ids != {baseline_target_id, second_target_id}
+                or set(self._expectations) != target_ids
+                or any(set(value) != set(_IDENTITY_FIELDS) for value in self._expectations.values())
+                or (authority_invariant_evidence_sha256 is None) != (authority_violation_count is None)):
+            raise GatewayError(ErrorCode.INVALID_EVIDENCE)
+
+    def _validate_receipt(self, receipt: AcquisitionReceipt, task: DevelopmentTask,
+                          freshness_seconds: int) -> datetime:
+        expected = self._expectations.get(receipt.target_id)
+        if (not receipt.synthetic or receipt.mode != "simulation" or expected is None
+                or receipt.request_sha256 != task.request_sha256()
+                or receipt.parameters_sha256 != task.parameters_sha256()
+                or any(getattr(receipt, key) != expected[key] for key in _IDENTITY_FIELDS)
+                or receipt.acquired_utc > self._now):
+            raise GatewayError(ErrorCode.INVALID_EVIDENCE)
+        expires = receipt.acquired_utc + timedelta(seconds=freshness_seconds)
+        if expires <= self._now:
+            raise GatewayError(ErrorCode.STALE_EVIDENCE)
+        # Row costs describe original acquisition, including when replayed. A
+        # known zero therefore needs an explicitly known zero original cost.
+        # None/None is admissible unknown evidence, never a free observation.
+        if receipt.known_cost_usd != receipt.original_acquisition_cost_usd:
+            raise GatewayError(ErrorCode.INVALID_EVIDENCE)
+        if receipt.reused:
+            source = self._sources.get(receipt.reuse_source_sha256)
+            if (source is None or digest(source) != receipt.reuse_source_sha256 or source.reused
+                    or source.task_id != receipt.task_id or source.target_id != receipt.target_id
+                    or receipt.acquired_utc < source.acquired_utc
+                    or receipt.attempt_count != 0 or receipt.current_reuse_cost_usd != Decimal("0")):
+                raise GatewayError(ErrorCode.INVALID_EVIDENCE)
+            expires = min(expires, self._validate_receipt(source, task, freshness_seconds))
+            # Reuse joins content and outcome as well as every request/target identity.
+            fields = (*_IDENTITY_FIELDS, "request_sha256", "parameters_sha256", "outcome_status",
+                      "response_ref", "response_text", "provider_receipt_sha256",
+                      "original_acquisition_cost_usd", "known_cost_usd", "retained_liability_usd",
+                      "latency_ms")
+            if any(getattr(source, key) != getattr(receipt, key) for key in fields):
+                raise GatewayError(ErrorCode.INVALID_EVIDENCE)
+        elif receipt.current_reuse_cost_usd is not None:
+            # There is no reuse operation on an original acquisition receipt.
+            raise GatewayError(ErrorCode.INVALID_EVIDENCE)
+        return expires
+
+    def run(self, frozen_spec: EvaluationSpec, corpus_manifest: CorpusManifest,
+            acquisition_receipts: Sequence[AcquisitionReceipt]) -> EvaluationReport:
+        spec = frozen_spec
+        corpus_hash = digest(corpus_manifest)
+        spec_hash = digest(spec)
+        policy = self._candidate
+        if spec.mode != "simulation" or self._authorization.mode != "simulation":
+            raise GatewayError(ErrorCode.EXTERNAL_DISABLED)
+        if (spec_hash != policy.eval_spec_sha256 or (self._verified_spec is not None and spec_hash != self._verified_spec)
+                or spec.corpus_sha256 != corpus_hash or spec.evaluator_code_sha256 != self._evaluator_code
+                or spec.matching_rules_sha256 != corpus_manifest.matching_rules_sha256
+                or spec.template_split_sha256 != corpus_manifest.template_split_sha256
+                or spec.price_sha256 != policy.price_sha256 or spec.bound_sha256 != policy.bound_bundle_sha256
+                or spec.feature_schema_sha256 != policy.feature_schema_sha256):
+            raise GatewayError(ErrorCode.INVALID_EVIDENCE)
+        evidence = EvidenceTuple(policy_bundle_sha256=digest(policy), eval_spec_sha256=spec_hash,
+                                 evaluator_code_sha256=spec.evaluator_code_sha256, corpus_sha256=corpus_hash,
+                                 metric_sha256=spec.metric_sha256,
+                                 adapter_capability_sha256=spec.adapter_capability_sha256,
+                                 adapter_sha256=spec.adapter_sha256, price_sha256=spec.price_sha256,
+                                 bound_sha256=spec.bound_sha256, feature_schema_sha256=spec.feature_schema_sha256)
+        auth_hash = digest(self._authorization)
+        if (self._authorization.tuple != evidence or self._verify_authorization(self._authorization) != auth_hash):
+            raise GatewayError(ErrorCode.INVALID_AUTHORIZATION)
+        if (not spec.created_utc <= self._now < spec.expires_utc
+                or not self._authorization.created_utc <= self._now < self._authorization.expires_utc
+                or self._now >= policy.expires_utc):
+            raise GatewayError(ErrorCode.STALE_EVIDENCE)
+        metadata = {task.task_id: task for task in corpus_manifest.tasks}
+        if (len(self._tasks) != 60 or len({task.task_id for task in self._tasks}) != 60
+                or {task.task_id for task in self._tasks} != set(metadata)):
+            raise GatewayError(ErrorCode.INVALID_EVIDENCE)
+        tasks = {task.task_id: task for task in self._tasks}
+        for task in self._tasks:
+            entry = metadata[task.task_id]
+            if (digest(task.source_content()) != entry.content_sha256 or task.family != entry.family
+                    or task.source_id != entry.source_id or task.template_id != entry.template_id
+                    or task.route_alias not in policy.route_aliases):
+                raise GatewayError(ErrorCode.INVALID_EVIDENCE)
+        for target in policy.targets:
+            expected = self._expectations[target.target_id]
+            if (expected["exact_model"] != target.exact_model or expected["adapter_sha256"] != target.adapter_sha256
+                    or expected["profile_sha256"] != target.capability_sha256
+                    or expected["price_sha256"] != spec.price_sha256 or expected["bound_sha256"] != spec.bound_sha256):
+                raise GatewayError(ErrorCode.INVALID_EVIDENCE)
+        table = {}
+        acquisition_ids = {}
+        acquisition_expiries = []
+        for receipt in acquisition_receipts:
+            if receipt.task_id not in tasks:
+                raise GatewayError(ErrorCode.INVALID_EVIDENCE)
+            acquisition_expiries.append(self._validate_receipt(
+                receipt, tasks[receipt.task_id], spec.freshness_seconds))
+            key = (receipt.task_id, receipt.target_id)
+            if ((key in table and digest(table[key]) != digest(receipt))
+                    or (receipt.acquisition_id in acquisition_ids and acquisition_ids[receipt.acquisition_id] != digest(receipt))):
+                raise GatewayError(ErrorCode.EVIDENCE_CONFLICT)
+            table[key] = receipt
+            acquisition_ids[receipt.acquisition_id] = digest(receipt)
+        chosen = {}
+        for task in self._tasks:
+            target = self._selector(task.features(), policy)
+            if target not in {self._baseline, self._second}:
+                raise GatewayError(ErrorCode.INELIGIBLE_POLICY)
+            chosen[task.task_id] = target
+        rows = []
+        for route in ("B0", "B1", "C", "s3_offline"):
+            route_items = tuple((task, table.get((task.task_id, self._baseline if route == "B0" else
+                                                 self._second if route == "B1" else chosen[task.task_id])))
+                                for task in self._tasks)
+            for family in (*FAMILIES, None):
+                rows.append(_route_row(route, family, tuple(item for item in route_items
+                                                           if family is None or item[0].family == family)))
+        pairs = tuple(_paired(family, tuple((task, table.get((task.task_id, chosen[task.task_id])),
+                                             table.get((task.task_id, self._baseline)))
+                                            for task in self._tasks if task.family == family), spec.bootstrap_seed)
+                      for family in FAMILIES)
+        missing = sum(not _observed(table.get((task.task_id, target)))
+                      for task in self._tasks for target in (self._baseline, self._second))
+        reasons = {reason for row in rows for reason in row.incomplete_reasons}
+        if any(pair.missing_pair_count for pair in pairs):
+            reasons.add("missing_pair")
+        if self._invariant_hash is None or self._verified_spec is None:
+            reasons.add("missing_evidence")
+        if self._violations:
+            reasons.add("authority_violation")
+        # Current shared validator cannot represent favorable quality-only bounds
+        # without authority evidence. Do not fabricate that evidence or alter a CI.
+        if missing or self._violations != 0 or self._invariant_hash is None:
+            pairs = tuple(pair for pair in pairs if pair.noninferiority != "noninferior")
+        regression = any(pair.noninferiority == "regression" for pair in pairs)
+        compatibility = "fail" if self._violations or regression else (
+            "pass" if not reasons and len(pairs) == 3 and all(
+                pair.noninferiority == "noninferior" for pair in pairs) else "inconclusive")
+        # Compatibility permits an evaluated baseline; benefit/promotion remains
+        # explicitly unmeasured in its separate field and is never inferred here.
+        # Artifact manifest excludes the resulting report and contains hashes only.
+        artifact_hash = digest({"schema_version": 1, "spec_sha256": spec_hash,
+                                "corpus_sha256": corpus_hash, "policy_sha256": digest(policy),
+                                "authorization_sha256": auth_hash,
+                                "acquisition_sha256": sorted(digest(receipt) for receipt in table.values()),
+                                "route_rows": tuple(rows), "paired_differences": pairs,
+                                "s3_offline_semantics": "same_candidate_selector_zero_acquisitions"})
+        return EvaluationReport(
+            report_id=self._report_id, tuple=evidence, evaluation_spec_sha256=spec_hash,
+            corpus_manifest_sha256=corpus_hash, authorization_sha256=auth_hash,
+            artifact_manifest_sha256=artifact_hash, mode="simulation", synthetic=True,
+            task_count=len(self._tasks), attempt_count=sum(receipt.attempt_count for receipt in table.values()
+                                                           if not receipt.reused),
+            missing_observation_count=missing, route_rows=tuple(rows), paired_differences=pairs,
+            authority_invariant_evidence_sha256=self._invariant_hash,
+            authority_violation_count=self._violations, compatibility_status=compatibility,
+            benefit_status="regression" if regression else "unmeasured",
+            status=compatibility,
+            incomplete_reasons=tuple(sorted(reasons)), registered_evaluation=None,
+            frozen_utc=self._now, expires_utc=min(spec.expires_utc, policy.expires_utc,
+                                                self._authorization.expires_utc,
+                                                self._now + timedelta(seconds=spec.freshness_seconds),
+                                                *acquisition_expiries),
+        )

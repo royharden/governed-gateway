@@ -12,3 +12,16 @@ results/
 
 # Preserve local source-history backups without shipping them.
 *.bak-*
+
+# REPO-M: credential and generated artifact exclusions
+.env*
+.creds/
+ArchiveManager-creds.txt
+*.pem
+*.key
+*.pfx
+*.egg-info/
+node_modules/
+dist/
+build/
+*.zip

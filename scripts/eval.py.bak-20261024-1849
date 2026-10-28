@@ -1,0 +1,78 @@
+"""Explicit offline development scoring entrypoint; never acquires outcomes."""
+from __future__ import annotations
+
+import argparse
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+import sys
+
+# Source checkout entrypoint. Installed packaging is INT-owned and still unverified.
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+if str(_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(_ROOT / "src"))
+
+from gateway.schemas import ErrorCode, EvaluationAuthorization, GatewayError, PolicyBundle, canonical_bytes
+from gateway.schemas.operator import AcquisitionReceipt, CorpusManifest, EvaluationSpec
+from gateway.evaluation.dataset import DevelopmentTask, load_development
+from gateway.evaluation.reporting import evaluation_json, render_evaluation
+from gateway.evaluation.scoring import EvalRunner
+
+
+@dataclass(frozen=True)
+class EvalCommandServices:
+    """INT composition binds verified registration/context; JSON cannot create it."""
+    runner_factory: Callable[[tuple[DevelopmentTask, ...], CorpusManifest, EvaluationSpec,
+                              PolicyBundle, EvaluationAuthorization], EvalRunner]
+
+
+def _read(model, path: Path):
+    try:
+        if path.stat().st_size > 16 * 1024 * 1024:
+            raise ValueError("artifact_too_large")
+        return model.model_validate_json(path.read_bytes())
+    except (OSError, ValueError, TypeError):
+        raise GatewayError(ErrorCode.INVALID_EVIDENCE) from None
+
+
+def main(argv: Sequence[str] | None = None, *, services: EvalCommandServices | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Synthetic development replay; source constructed, runtime unverified")
+    parser.add_argument("--mode", choices=("mock", "recorded", "live"), default="mock")
+    parser.add_argument("--dataset", type=Path, default=_ROOT / "fixtures" / "tasks" / "dev")
+    parser.add_argument("--spec", type=Path, required=True)
+    parser.add_argument("--policy", type=Path, required=True)
+    parser.add_argument("--authorization", type=Path, required=True)
+    parser.add_argument("--receipt", type=Path, action="append", default=[])
+    parser.add_argument("--format", choices=("json", "markdown"), default="markdown")
+    args = parser.parse_args(argv)
+    try:
+        if args.mode != "mock":
+            raise GatewayError(ErrorCode.EXTERNAL_DISABLED)
+        if services is None:
+            raise GatewayError(ErrorCode.DEPENDENCY_UNAVAILABLE)
+        manifest, tasks = load_development(args.dataset)
+        spec = _read(EvaluationSpec, args.spec)
+        policy = _read(PolicyBundle, args.policy)
+        authorization = _read(EvaluationAuthorization, args.authorization)
+        if spec.mode != "simulation" or authorization.mode != "simulation":
+            raise GatewayError(ErrorCode.EXTERNAL_DISABLED)
+        runner = services.runner_factory(tasks, manifest, spec, policy, authorization)
+        report = runner.run(spec, manifest, tuple(_read(AcquisitionReceipt, path) for path in args.receipt))
+        artifacts = runner.artifacts_for(report)
+        if args.format == "json":
+            sys.stdout.write(evaluation_json(report, artifacts=artifacts))
+        else:
+            render_evaluation(report, output=sys.stdout, artifacts=artifacts)
+        return 0 if report.status == "pass" else 3
+    except GatewayError as error:
+        sys.stderr.write(canonical_bytes({"error": error.code.value}).decode("utf-8") + "\n")
+        return 2
+    except (OSError, ValueError, TypeError, ImportError):
+        sys.stderr.write('{"error":"invalid_evidence"}\n')
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
