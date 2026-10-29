@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 
-from gateway.schemas import ErrorCode, GatewayError, canonical_bytes
+from gateway.schemas import ErrorCode, GatewayError
 from gateway.controller.ports import CancellationToken
 from .auth import ClientAuthenticator
 from .errors import error_reply

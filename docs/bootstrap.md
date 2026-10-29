@@ -1,5 +1,49 @@
 # Explicit no-key simulation bootstrap
 
+## Reproducing the local environment
+
+The R03 environment pins CPython 3.12.13 in `.python-version`, runtime and development
+dependencies in `uv.lock`, and setuptools 80.9.0 as the build backend. From any
+directory, use `uv sync --project <absolute-checkout> --frozen --python 3.12.13`.
+Then use `<checkout>/.venv/Scripts/python.exe` on Windows. An editable installation
+loads that checkout's source; when borrowing an interpreter for another checkout,
+set `PYTHONPATH` explicitly to that other checkout's `src` directory.
+
+`uv build --project <absolute-checkout>` produces a source archive and wheel.
+The wheel supports package imports; the demonstration currently requires the source
+checkout's frozen development fixtures and migration. It is not a self-contained
+installed-wheel demonstration.
+
+On Windows, `scripts/bootstrap.ps1 -Config <absolute-nonsecret-json> -RuntimeRoot
+<absolute-existing-local-directory> -Initialize` invokes the local interpreter and
+temporarily sets `GATEWAY_RUNTIME_ROOT`. It does not create or renew a configuration,
+change its budget, load credentials, or enable external transports. Obtain an explicit
+new simulation authority before creating fresh stores. An expired sample remains
+expired; preserve its fixed lifetime and retained stores.
+
+The historical construction notes below describe the original unexecuted source
+baseline. R03 dependency sync, package import, bootstrap `--help`, and archive/wheel
+build have executed on Windows with Python 3.12.13. These checks do not establish
+the full journey, restart, custody, live-provider, or product acceptance obligations.
+
+The process-local high-water implementation keeps one private SQLite connection
+for the context lifetime. Each clock invocation still validates the full runtime
+path, checks the pinned database identity and authority configuration, reads durable
+time, checks rollback/drift, and commits its compare-and-swap under the authority
+lock. It never reuses an observed time between calls. Recursive observations and
+evidence requested during an observation refuse and permanently close trust, even
+if a callback catches the inner error. Guard/observation entry, body and exit errors
+also permanently deny time and evidence; restoring a guard cannot revive the
+instance. Owner PID checks precede guard access, including standalone reads and
+compare-and-swap. Threads serialize through the same lock. Forked, closed,
+replaced-path, or failed handles refuse rather than reconnect. Failure first
+latches trust closed without closing another thread's active SQLite handle;
+disposal occurs under the authority guard after the active observation exits.
+Failed guard acquisition defers disposal until a safe guarded cleanup is possible.
+Closing the context also closes this handle; bootstrap failures attempt both
+ledger and high-water cleanup. These lifecycle rules require the independent
+clock/path/storage checks before acceptance.
+
 This is source construction, not a verified runnable demo or runtime/product acceptance. No bootstrap, database, signing, acquisition, installation or test was executed while authoring it. Real provider APIs and protected-file key loaders are not wired here.
 
 The intended entrypoint is `python -m gateway.bootstrap --config <absolute-nonsecret-simulation.json> --initialize`, from an installed package or a separately configured src-layout Python environment. It builds concrete trusted services and calls the actual packaged `gateway.cli.demo.main(services=...)`. Calling `gateway.cli.demo.main()` without injected services still fails closed; it does not implicitly bootstrap or load a dotenv file.

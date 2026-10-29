@@ -10,23 +10,26 @@ import re
 from collections.abc import Mapping
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationInfo, field_validator
 
 
 class Record(BaseModel):
     model_config = ConfigDict(strict=True, frozen=True, extra="forbid", hide_input_in_errors=True)
     schema_version: Literal[1] = 1
 
-    @model_validator(mode="before")
+    @field_validator(
+        "schema_version", "n", "max_attempts", "precision",
+        "stream", "undispatched", "synthetic", "bootstrap_resamples",
+        mode="before", check_fields=False,
+    )
     @classmethod
-    def exact_literals(cls, value: Any) -> Any:
-        if isinstance(value, dict):
-            for field in ("schema_version", "n", "max_attempts", "precision"):
-                if field in value and field in cls.model_fields and type(value[field]) is not int:
-                    raise ValueError("invalid_literal")
-            for field in ("stream", "undispatched"):
-                if field in value and field in cls.model_fields and type(value[field]) is not bool:
-                    raise ValueError("invalid_literal")
+    def exact_literals(cls, value: Any, info: ValidationInfo) -> Any:
+        # A model-level before validator materializes JSON arrays as Python
+        # lists before strict tuple decoding. Validate only these scalar fields
+        # so JSON retains its native strict decoding, including nested records.
+        expected = bool if info.field_name in {"stream", "undispatched", "synthetic"} else int
+        if type(value) is not expected:
+            raise ValueError("invalid_literal")
         return value
 
 
